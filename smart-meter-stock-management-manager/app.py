@@ -24,10 +24,10 @@ DATA_FILE = DATA_DIR / "stock_requests.csv"
 def hash_password(p): return hashlib.sha256(p.encode()).hexdigest()
 
 raw_users = {
-    "contractor1": {"name": "Contractor One", "password": "contractor123", "role": "contractor"},
-    "city1": {"name": "City User", "password": "city123", "role": "city"},
-    "installer1": {"name": "Installer One", "password": "installer123", "role": "installer"},
-    "manager1": {"name": "Manager One", "password": "manager123", "role": "manager"},
+    "contractor1": {"name": "Deezlotraiding", "password": "Dezzlo123!", "role": "contractor"},
+    "city1": {"name": "eThekwini", "password": "eThekwini123!", "role": "city"},
+    "installer1": {"name": "Tinesh", "password": "Tinesh123", "role": "installer"},
+    "manager1": {"name": "Reece", "password": "Reece123", "role": "manager"},
 }
 
 CREDENTIALS = {u: {"name": v["name"], "password_hash": hash_password(v["password"]), "role": v["role"]} for u, v in raw_users.items()}
