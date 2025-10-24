@@ -49,6 +49,12 @@ def generate_request_id(): return f"REQ-{datetime.now().strftime('%Y%m%d%H%M%S')
 if "auth" not in st.session_state:
     st.session_state.auth = {"logged_in": False, "username": None, "role": None, "name": None}
 
+def safe_rerun():
+    try:
+        st.rerun()
+    except Exception:
+        st.experimental_rerun()
+
 def login_ui():
     st.title("Login")
     username = st.text_input("Username")
@@ -61,13 +67,13 @@ def login_ui():
                 "role": CREDENTIALS[username]["role"],
                 "name": CREDENTIALS[username]["name"]
             })
-            st.experimental_rerun()
+            safe_rerun()
         else:
             st.error("Invalid credentials.")
 
 def logout():
     st.session_state.auth = {"logged_in": False, "username": None, "role": None, "name": None}
-    st.experimental_rerun()
+    safe_rerun()
 
 def contractor_ui():
     st.header("Contractor - Submit Stock Request")
@@ -112,7 +118,7 @@ def city_ui():
             df.loc[df["Request_ID"]==sel,"Approved_Qty"]=qty
             ppath=""
             if photo:
-                dest=ISSUED_PHOTOS_DIR/f"{sel}_{photo.name}"
+                dest=PHOTO_DIR/f"{sel}_{photo.name}"
                 with open(dest,"wb") as f:f.write(photo.getbuffer())
                 ppath=str(dest)
             df.loc[df["Request_ID"]==sel,"Photo_Path"]=ppath
