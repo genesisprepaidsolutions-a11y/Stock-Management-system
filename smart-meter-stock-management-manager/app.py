@@ -9,10 +9,11 @@ from reportlab.lib import colors
 from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
 from reportlab.lib.styles import getSampleStyleSheet
 import os
+from PIL import Image
 
-st.set_page_config(page_title="Acucomm Stock Management", page_icon="📦", layout="wide")
-
-# === Directories ===
+# -------------------------
+# Paths & Logo preparation
+# -------------------------
 ROOT = Path(__file__).parent
 DATA_DIR = ROOT / "data"
 PHOTO_DIR = ROOT / "photos"
@@ -22,27 +23,62 @@ for d in [DATA_DIR, PHOTO_DIR, ISSUED_PHOTOS_DIR, REPORT_DIR]:
     d.mkdir(parents=True, exist_ok=True)
 DATA_FILE = DATA_DIR / "stock_requests.csv"
 
-# === User Database ===
+# Developer-provided logo path (image must be present at this path)
+# The environment contains: /mnt/data/Acucomm logo.jpg
+SUPPLIED_LOGO_PATHS = [
+    Path("/mnt/data/Acucomm logo.jpg"),
+    ROOT / "Acucomm logo.jpg",
+    ROOT / "Acucomm_logo.jpg",
+    ROOT / "Acucomm_logo.png",
+]
+
+def find_logo_path():
+    for p in SUPPLIED_LOGO_PATHS:
+        if p.exists():
+            return p
+    return None
+
+logo_path = find_logo_path()
+_full_logo_bytes = None
+_favicon_bytes = None
+
+if logo_path:
+    try:
+        # Load full logo bytes for page header
+        with open(logo_path, "rb") as f:
+            _full_logo_bytes = f.read()
+
+        # Create a cropped favicon from the left portion of the image (icon mark)
+        # This assumes the supplied logo has the mark on the left and words on the right.
+        img = Image.open(logo_path).convert("RGBA")
+        w, h = img.size
+        # Crop left 30% of image — this captures the mark in most left-aligned logo layouts
+        crop_x = max(1, int(w * 0.30))
+        crop_box = (0, 0, crop_x, h)
+        icon_img = img.crop(crop_box)
+        # Resize to small favicon size (32x32) for page icon
+        icon_img = icon_img.resize((32, 32), Image.LANCZOS)
+        bio = BytesIO()
+        icon_img.save(bio, format="PNG")
+        bio.seek(0)
+        _favicon_bytes = bio.read()
+    except Exception:
+        # fallback: use full logo bytes as favicon
+        _favicon_bytes = _full_logo_bytes
+
+# -------------------------
+# Streamlit page config
+# -------------------------
+# Use the generated favicon bytes if available; otherwise default to an emoji.
+page_icon = _favicon_bytes if _favicon_bytes else "📦"
+st.set_page_config(page_title="Acucomm Stock Management", page_icon=page_icon, layout="wide")
+
+# -------------------------
+# Utility helpers
+# -------------------------
 def hash_password(p):
     return hashlib.sha256(p.encode()).hexdigest()
 
-raw_users = {
-    "Deezlo": {"name": "Deezlo", "password": "Deezlo123", "role": "contractor"},
-    "ethekwini": {"name": "ethekwini", "password": "ethwkwini123", "role": "city"},
-    "installer1": {"name": "installer1", "password": "installer123", "role": "installer"},
-    "Reece": {"name": "Reece", "password": "Reece123!", "role": "manager"},
-}
-
-CREDENTIALS = {
-    u: {
-        "name": v["name"],
-        "password_hash": hash_password(v["password"]),
-        "role": v["role"],
-    }
-    for u, v in raw_users.items()
-}
-
-# === Utility Functions ===
 def load_data():
     if DATA_FILE.exists():
         try:
@@ -72,8 +108,50 @@ def safe_rerun():
     except Exception:
         pass
 
-# === Login ===
+# -------------------------
+# Users / Credentials
+# -------------------------
+raw_users = {
+    "Deezlo": {"name": "Deezlo", "password": "Deezlo123", "role": "contractor"},
+    "ethekwini": {"name": "ethekwini", "password": "ethwkwini123", "role": "city"},
+    "installer1": {"name": "installer1", "password": "installer123", "role": "installer"},
+    "Reece": {"name": "Reece", "password": "Reece123!", "role": "manager"},
+    # NEW contractor added as requested:
+    "Nimba": {"name": "Nimba", "password": "Nimba123", "role": "contractor"},
+}
+
+CREDENTIALS = {
+    u: {
+        "name": v["name"],
+        "password_hash": hash_password(v["password"]),
+        "role": v["role"],
+    }
+    for u, v in raw_users.items()
+}
+
+# -------------------------
+# Header rendering (logo top-left)
+# -------------------------
+def render_header():
+    # Display the supplied full-logo at top-left if available, and app title to the right
+    cols = st.columns([1, 10])
+    with cols[0]:
+        if _full_logo_bytes:
+            try:
+                st.image(_full_logo_bytes, use_column_width=False, width=160)
+            except Exception:
+                # fallback to text title if image fails
+                st.markdown("**Acucomm Stock Management**")
+        else:
+            st.markdown("**Acucomm Stock Management**")
+    with cols[1]:
+        st.markdown("<h1 style='margin:0; padding-top:10px'>Acucomm Stock Management</h1>", unsafe_allow_html=True)
+
+# -------------------------
+# Login UI
+# -------------------------
 def login_ui():
+    render_header()
     st.title("🔐 Login")
     username = st.text_input("Username")
     password = st.text_input("Password", type="password")
@@ -93,8 +171,11 @@ def logout():
     st.session_state.auth = {"logged_in": False, "username": None, "role": None, "name": None}
     safe_rerun()
 
-# === Contractor UI ===
+# -------------------------
+# Contractor UI
+# -------------------------
 def contractor_ui():
+    render_header()
     st.header("👷 Contractor - Submit Stock Request")
     contractor_name = st.session_state.auth["name"]
 
@@ -164,8 +245,11 @@ def contractor_ui():
     myreq = df[df["Contractor_Name"] == contractor_name]
     st.dataframe(myreq, use_container_width=True)
 
-# === City UI ===
+# -------------------------
+# City UI
+# -------------------------
 def city_ui():
+    render_header()
     st.header("🏙️ City - Verify Requests")
     df = load_data()
     pending = df[df["Status"] == "Pending Verification"]
@@ -202,8 +286,11 @@ def city_ui():
             st.error("❌ Declined.")
             safe_rerun()
 
-# === Installer UI ===
+# -------------------------
+# Installer UI
+# -------------------------
 def installer_ui():
+    render_header()
     st.header("🔧 Installer - Mark Received Stock")
     df = load_data()
     installer = st.session_state.auth["name"].strip().lower()
@@ -219,8 +306,11 @@ def installer_ui():
         st.success(f"Request {sel} marked as received.")
         safe_rerun()
 
-# === Manager UI ===
+# -------------------------
+# Manager UI
+# -------------------------
 def manager_ui():
+    render_header()
     st.header("📊 Manager - Reconciliation & Export")
     df = load_data()
     st.dataframe(df, use_container_width=True)
@@ -276,10 +366,14 @@ def manager_ui():
         with open(pdf_path, "rb") as f:
             st.download_button("⬇️ Download PDF", f, file_name=pdf_path.name)
 
-# === Role Routing ===
+# -------------------------
+# Routing
+# -------------------------
 if not st.session_state.auth["logged_in"]:
     login_ui()
 else:
+    # Sidebar user info & logout
+    render_header()
     st.sidebar.write(f"Logged in as **{st.session_state.auth['name']}** ({st.session_state.auth['role']})")
     if st.sidebar.button("Logout"):
         logout()
