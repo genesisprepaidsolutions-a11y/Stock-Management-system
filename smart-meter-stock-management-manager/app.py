@@ -1,3 +1,4 @@
+# app.py
 import streamlit as st
 import pandas as pd
 from datetime import datetime
@@ -11,9 +12,9 @@ from reportlab.lib.styles import getSampleStyleSheet
 import os
 from PIL import Image
 
-# -------------------------
-# Paths & Logo preparation
-# -------------------------
+# ======================================================
+# CONFIG & PATHS
+# ======================================================
 ROOT = Path(__file__).parent
 DATA_DIR = ROOT / "data"
 PHOTO_DIR = ROOT / "photos"
@@ -23,18 +24,21 @@ for d in [DATA_DIR, PHOTO_DIR, ISSUED_PHOTOS_DIR, REPORT_DIR]:
     d.mkdir(parents=True, exist_ok=True)
 DATA_FILE = DATA_DIR / "stock_requests.csv"
 
-# Developer-provided logo path (image must be present at this path)
-# The environment contains: /mnt/data/Acucomm logo.jpg
+# Possible logo paths (user indicated: acucomm logo.PNG in data folder)
 SUPPLIED_LOGO_PATHS = [
-    Path("/mnt/data/Acucomm logo.jpg"),
+    DATA_DIR / "acucomm logo.PNG",
+    DATA_DIR / "acucomm logo.png",
+    DATA_DIR / "acucomm_logo.PNG",
+    DATA_DIR / "acucomm_logo.png",
+    Path("/mnt/data/acucomm logo.PNG"),
+    Path("/mnt/data/58a301d8-6c4d-4d41-b9e1-dadf14e5ad54.png"),
     ROOT / "Acucomm logo.jpg",
-    ROOT / "Acucomm_logo.jpg",
     ROOT / "Acucomm_logo.png",
 ]
 
 def find_logo_path():
     for p in SUPPLIED_LOGO_PATHS:
-        if p.exists():
+        if p and p.exists():
             return p
     return None
 
@@ -44,38 +48,122 @@ _favicon_bytes = None
 
 if logo_path:
     try:
-        # Load full logo bytes for page header
         with open(logo_path, "rb") as f:
             _full_logo_bytes = f.read()
 
-        # Create a cropped favicon from the left portion of the image (icon mark)
-        # This assumes the supplied logo has the mark on the left and words on the right.
+        # Create a cropped favicon from the left portion of the image (assumes mark is left)
         img = Image.open(logo_path).convert("RGBA")
         w, h = img.size
-        # Crop left 30% of image — this captures the mark in most left-aligned logo layouts
-        crop_x = max(1, int(w * 0.30))
+        # crop left portion (adjustable): using 28% to capture mark
+        crop_x = max(1, int(w * 0.28))
         crop_box = (0, 0, crop_x, h)
         icon_img = img.crop(crop_box)
-        # Resize to small favicon size (32x32) for page icon
-        icon_img = icon_img.resize((32, 32), Image.LANCZOS)
+        # make square by padding if needed
+        sq = max(icon_img.size)
+        square_img = Image.new("RGBA", (sq, sq), (255, 255, 255, 0))
+        square_img.paste(icon_img, ((sq - icon_img.width) // 2, (sq - icon_img.height) // 2), icon_img)
+        icon_img = square_img.resize((32, 32), Image.LANCZOS)
         bio = BytesIO()
         icon_img.save(bio, format="PNG")
         bio.seek(0)
         _favicon_bytes = bio.read()
     except Exception:
-        # fallback: use full logo bytes as favicon
         _favicon_bytes = _full_logo_bytes
 
-# -------------------------
-# Streamlit page config
-# -------------------------
-# Use the generated favicon bytes if available; otherwise default to an emoji.
+# Use favicon bytes if available; otherwise default emoji
 page_icon = _favicon_bytes if _favicon_bytes else "📦"
 st.set_page_config(page_title="Acucomm Stock Management", page_icon=page_icon, layout="wide")
 
-# -------------------------
-# Utility helpers
-# -------------------------
+# ======================================================
+# THEME / STYLES (Acucomm palette & modern card)
+# ======================================================
+# Corporate palette (greens)
+PRIMARY = "#2E7A3E"      # dark green
+ACCENT = "#7BC26A"       # light green
+ACCENT_DARK = "#1F5A2A"  # darker green for accents
+CARD_BG = "rgba(255,255,255,0.96)"  # card background with slight transparency
+
+app_css = f"""
+<style>
+:root {{
+  --primary: {PRIMARY};
+  --accent: {ACCENT};
+  --accent-dark: {ACCENT_DARK};
+}}
+/* page background gradient */
+[data-testid="stAppViewContainer"] {{
+  background: linear-gradient(180deg, rgba(243,249,240,1) 0%, rgba(255,255,255,1) 40%);
+}}
+
+/* header area and logo spacing */
+.header-row {{
+  display:flex;
+  align-items:center;
+  gap:16px;
+  margin-bottom: 18px;
+}}
+
+/* title styling */
+.app-title {{
+  font-size:28px;
+  font-weight:700;
+  color: var(--primary);
+  margin:0;
+}}
+
+/* centered login card */
+.brand-card {{
+  background: {CARD_BG};
+  border-radius: 12px;
+  box-shadow: 0 6px 20px rgba(31,90,42,0.12);
+  padding: 26px;
+  max-width: 820px;
+  margin: 22px auto;
+  border-left: 6px solid var(--accent);
+}}
+
+/* label and headings */
+.login-heading {{
+  font-size:26px;
+  font-weight:700;
+  color: var(--accent-dark);
+  margin-bottom:6px;
+}}
+
+/* streamline buttons look */
+.stButton>button {{
+  background: linear-gradient(90deg, var(--primary), var(--accent));
+  color: white;
+  border-radius: 8px;
+  padding: 10px 18px;
+  border: none;
+}}
+.stButton>button:hover {{
+  filter: brightness(1.05);
+}}
+
+/* smaller tweaks for inputs to look roomy */
+.stTextInput>div>div>input, .stNumberInput>div>div>input, .stTextArea>div>div>textarea {{
+  padding: 12px;
+  border-radius: 8px;
+}}
+/* center alignment helper */
+.center-wrapper {{
+  display:flex;
+  justify-content:center;
+}}
+/* small footer */
+.small-note {{
+  color: #556B4A;
+  font-size:12px;
+}}
+</style>
+"""
+st.markdown(app_css, unsafe_allow_html=True)
+
+# ======================================================
+# UTILITY FUNCTIONS
+# ======================================================
 def hash_password(p):
     return hashlib.sha256(p.encode()).hexdigest()
 
@@ -108,18 +196,16 @@ def safe_rerun():
     except Exception:
         pass
 
-# -------------------------
-# Users / Credentials
-# -------------------------
+# ======================================================
+# USERS / CREDENTIALS (unchanged plus Nimba)
+# ======================================================
 raw_users = {
     "Deezlo": {"name": "Deezlo", "password": "Deezlo123", "role": "contractor"},
     "ethekwini": {"name": "ethekwini", "password": "ethwkwini123", "role": "city"},
     "installer1": {"name": "installer1", "password": "installer123", "role": "installer"},
     "Reece": {"name": "Reece", "password": "Reece123!", "role": "manager"},
-    # NEW contractor added as requested:
     "Nimba": {"name": "Nimba", "password": "Nimba123", "role": "contractor"},
 }
-
 CREDENTIALS = {
     u: {
         "name": v["name"],
@@ -129,53 +215,75 @@ CREDENTIALS = {
     for u, v in raw_users.items()
 }
 
-# -------------------------
-# Header rendering (logo top-left)
-# -------------------------
-def render_header():
-    # Display the supplied full-logo at top-left if available, and app title to the right
-    cols = st.columns([1, 10])
+# ======================================================
+# HEADER RENDER (logo top-left, title, subtle spacing)
+# ======================================================
+def render_header(compact=False):
+    # compact param used for small header in sidebar pages if needed
+    cols = st.columns([0.9, 9.1])
     with cols[0]:
         if _full_logo_bytes:
             try:
-                st.image(_full_logo_bytes, use_column_width=False, width=160)
+                st.image(_full_logo_bytes, width=140)
             except Exception:
-                # fallback to text title if image fails
-                st.markdown("**Acucomm Stock Management**")
+                st.markdown(f"<div style='font-weight:700; color:{PRIMARY}'>Acucomm</div>", unsafe_allow_html=True)
         else:
-            st.markdown("**Acucomm Stock Management**")
+            st.markdown(f"<div style='font-weight:700; color:{PRIMARY}'>Acucomm</div>", unsafe_allow_html=True)
     with cols[1]:
-        st.markdown("<h1 style='margin:0; padding-top:10px'>Acucomm Stock Management</h1>", unsafe_allow_html=True)
+        st.markdown(f"<div style='padding-left:6px; margin-top:6px'><h1 class='app-title'>Acucomm Stock Management</h1></div>", unsafe_allow_html=True)
 
-# -------------------------
-# Login UI
-# -------------------------
+# ======================================================
+# LOGIN UI (modern card)
+# ======================================================
 def login_ui():
+    # Full page header
     render_header()
-    st.title("🔐 Login")
-    username = st.text_input("Username")
-    password = st.text_input("Password", type="password")
-    if st.button("Login"):
-        if username in CREDENTIALS and hash_password(password) == CREDENTIALS[username]["password_hash"]:
-            st.session_state.auth.update({
-                "logged_in": True,
-                "username": username,
-                "role": CREDENTIALS[username]["role"],
-                "name": CREDENTIALS[username]["name"]
-            })
-            safe_rerun()
-        else:
-            st.error("Invalid credentials.")
 
-def logout():
-    st.session_state.auth = {"logged_in": False, "username": None, "role": None, "name": None}
-    safe_rerun()
+    # card container (centered)
+    st.markdown("<div class='brand-card'>", unsafe_allow_html=True)
+    cols = st.columns([1, 2, 1])
+    with cols[0]:
+        st.write("")  # spacer
+    with cols[1]:
+        st.markdown("<div class='login-heading'>🔐 Login</div>", unsafe_allow_html=True)
+        st.write("")  # small spacer
 
-# -------------------------
+        # Username & password entries with generous spacing
+        username = st.text_input("Username", placeholder="Enter your username")
+        password = st.text_input("Password", type="password", placeholder="Enter your password")
+
+        # Login button full width
+        login_col1, login_col2 = st.columns([1, 1])
+        with login_col1:
+            if st.button("Login"):
+                if username in CREDENTIALS and hash_password(password) == CREDENTIALS[username]["password_hash"]:
+                    st.session_state.auth.update({
+                        "logged_in": True,
+                        "username": username,
+                        "role": CREDENTIALS[username]["role"],
+                        "name": CREDENTIALS[username]["name"]
+                    })
+                    safe_rerun()
+                else:
+                    st.error("Invalid credentials. Please verify username and password.")
+        with login_col2:
+            # placeholder for future actions (e.g., "Forgot password")
+            if st.button("Need help?"):
+                st.info("Contact Acucomm support: support@acucomm.local")
+
+        st.write("")
+        st.markdown("<div class='small-note'>Use your contractor/city/installer credentials. Example contractor: <b>Nimba</b> / <b>Nimba123</b></div>", unsafe_allow_html=True)
+
+    with cols[2]:
+        st.write("")  # spacer
+    st.markdown("</div>", unsafe_allow_html=True)
+
+# ======================================================
 # Contractor UI
-# -------------------------
+# ======================================================
 def contractor_ui():
     render_header()
+    st.markdown("<div style='margin-top:8px'></div>", unsafe_allow_html=True)
     st.header("👷 Contractor - Submit Stock Request")
     contractor_name = st.session_state.auth["name"]
 
@@ -188,7 +296,7 @@ def contractor_ui():
     with col2:
         keypad_qty = st.number_input("CIU Keypad Quantity", min_value=0, value=0, step=1)
 
-    notes = st.text_area("Notes")
+    notes = st.text_area("Notes", height=110)
 
     if st.button("Submit Request"):
         if not installer_name:
@@ -245,9 +353,9 @@ def contractor_ui():
     myreq = df[df["Contractor_Name"] == contractor_name]
     st.dataframe(myreq, use_container_width=True)
 
-# -------------------------
+# ======================================================
 # City UI
-# -------------------------
+# ======================================================
 def city_ui():
     render_header()
     st.header("🏙️ City - Verify Requests")
@@ -286,9 +394,9 @@ def city_ui():
             st.error("❌ Declined.")
             safe_rerun()
 
-# -------------------------
+# ======================================================
 # Installer UI
-# -------------------------
+# ======================================================
 def installer_ui():
     render_header()
     st.header("🔧 Installer - Mark Received Stock")
@@ -306,9 +414,9 @@ def installer_ui():
         st.success(f"Request {sel} marked as received.")
         safe_rerun()
 
-# -------------------------
+# ======================================================
 # Manager UI
-# -------------------------
+# ======================================================
 def manager_ui():
     render_header()
     st.header("📊 Manager - Reconciliation & Export")
@@ -366,17 +474,18 @@ def manager_ui():
         with open(pdf_path, "rb") as f:
             st.download_button("⬇️ Download PDF", f, file_name=pdf_path.name)
 
-# -------------------------
-# Routing
-# -------------------------
+# ======================================================
+# ROUTING
+# ======================================================
 if not st.session_state.auth["logged_in"]:
     login_ui()
 else:
-    # Sidebar user info & logout
+    # render header and sidebar
     render_header()
     st.sidebar.write(f"Logged in as **{st.session_state.auth['name']}** ({st.session_state.auth['role']})")
     if st.sidebar.button("Logout"):
-        logout()
+        st.session_state.auth = {"logged_in": False, "username": None, "role": None, "name": None}
+        safe_rerun()
 
     role = st.session_state.auth["role"]
     if role == "contractor":
@@ -389,3 +498,4 @@ else:
         manager_ui()
     else:
         st.error("Unknown role.")
+
