@@ -1,4 +1,3 @@
-
 import streamlit as st
 import pandas as pd
 from datetime import datetime
@@ -9,35 +8,54 @@ from reportlab.lib.pagesizes import A4, landscape
 from reportlab.lib import colors
 from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
 from reportlab.lib.styles import getSampleStyleSheet
-from PIL import Image
 import os
 
-st.set_page_config(page_title="Acucomm Stock Management", page_icon="assets/acucomm_logo.jpg", layout="wide")
+# ---------------------------------------------------------
+# PAGE CONFIGURATION
+# ---------------------------------------------------------
+st.set_page_config(
+    page_title="Acucomm Stock Management",
+    page_icon="📦",
+    layout="wide",
+)
 
+# Custom style (white/gray + green accents)
+st.markdown("""
+    <style>
+    .stApp {
+        background-color: #f9f9f9;
+        color: #222;
+    }
+    .stButton>button {
+        background-color: #6BBE44;
+        color: white;
+        border-radius: 8px;
+        border: none;
+    }
+    .stButton>button:hover {
+        background-color: #5aa53b;
+        color: white;
+    }
+    h1, h2, h3, h4 {
+        color: #2B6C3D;
+    }
+    </style>
+""", unsafe_allow_html=True)
+
+# ---------------------------------------------------------
+# DIRECTORIES
+# ---------------------------------------------------------
 ROOT = Path(__file__).parent
-ASSETS = ROOT / "assets"
 DATA_DIR = ROOT / "data"
 PHOTO_DIR = ROOT / "photos"
-ISSUED_PHOTOS_DIR = PHOTO_DIR / "issued"
 REPORT_DIR = ROOT / "reports"
-for d in [DATA_DIR, PHOTO_DIR, ISSUED_PHOTOS_DIR, REPORT_DIR, ASSETS]:
+for d in [DATA_DIR, PHOTO_DIR, REPORT_DIR]:
     d.mkdir(parents=True, exist_ok=True)
 DATA_FILE = DATA_DIR / "stock_requests.csv"
 
-# branding colors
-PRIMARY = "#6BBE44"
-DARK = "#2B6C3D"
-ACCENT = "#A1D884"
-BG = "#F5F8F5"
-
-# load logo
-logo_path = ASSETS / "acucomm_logo.jpg"
-if logo_path.exists():
-    logo = Image.open(logo_path)
-else:
-    logo = None
-
-# users
+# ---------------------------------------------------------
+# USER DATABASE
+# ---------------------------------------------------------
 def hash_password(p):
     return hashlib.sha256(p.encode()).hexdigest()
 
@@ -48,11 +66,18 @@ raw_users = {
     "Reece": {"name": "Reece", "password": "Reece123!", "role": "manager"},
 }
 
-CREDENTIALS = {}
-for u,v in raw_users.items():
-    CREDENTIALS[u] = {"name": v["name"], "password_hash": hash_password(v["password"]), "role": v["role"]}
+CREDENTIALS = {
+    u: {
+        "name": v["name"],
+        "password_hash": hash_password(v["password"]),
+        "role": v["role"],
+    }
+    for u, v in raw_users.items()
+}
 
-# helpers
+# ---------------------------------------------------------
+# UTILITY FUNCTIONS
+# ---------------------------------------------------------
 def load_data():
     if DATA_FILE.exists():
         try:
@@ -61,18 +86,17 @@ def load_data():
             pass
     cols = [
         "Date_Requested", "Request_ID", "Contractor_Name", "Installer_Name",
-        "Meter_Type", "Requested_Qty", "Approved_Qty", "Photo_Path",
-        "Status", "Contractor_Notes", "City_Notes", "Decline_Reason",
+        "DN15_Meter_Qty", "Keypad_Qty", "Approved_DN15", "Approved_Keypad",
+        "Photo_Path", "Status", "Contractor_Notes", "City_Notes", "Decline_Reason",
         "Date_Approved", "Date_Received"
     ]
     return pd.DataFrame(columns=cols)
 
 def save_data(df):
-    DATA_DIR.mkdir(parents=True, exist_ok=True)
     df.to_csv(DATA_FILE, index=False)
 
 def generate_request_id():
-    return "REQ-" + datetime.now().strftime("%Y%m%d%H%M%S")
+    return f"REQ-{datetime.now().strftime('%Y%m%d%H%M%S')}"
 
 if "auth" not in st.session_state:
     st.session_state.auth = {"logged_in": False, "username": None, "role": None, "name": None}
@@ -83,41 +107,15 @@ def safe_rerun():
     except Exception:
         pass
 
-# CSS
-st.markdown(f"""<style>
-.sidebar .sidebar-content {{
-    background-color: {BG};
-}}
-.stButton>button {{
-    background: linear-gradient(90deg, {PRIMARY}, {ACCENT});
-    color: white;
-    border: none;
-}}
-.card {{
-    background: white;
-    border-radius:8px;
-    padding:12px;
-    box-shadow: 0 1px 3px rgba(0,0,0,0.05);
-}}
-</style>""", unsafe_allow_html=True)
-
-# header
-col1, col2 = st.columns([1,6])
-with col1:
-    if logo:
-        st.image(logo, width=120)
-with col2:
-    st.markdown(f"""<div style='padding-top:20px'>
-        <h1 style='margin:0;color:{DARK};'>Acucomm Stock Management</h1>
-        <div style='color: #666;'>Manage stock requests, approvals and reconciliations</div>
-    </div>""", unsafe_allow_html=True)
-
-# login UI
+# ---------------------------------------------------------
+# LOGIN
+# ---------------------------------------------------------
 def login_ui():
-    st.sidebar.header("Login")
-    username = st.sidebar.text_input("Username")
-    password = st.sidebar.text_input("Password", type="password")
-    if st.sidebar.button("Login"):
+    st.image("assets/acucomm_logo.jpg", width=180)
+    st.title("🔐 Acucomm Stock Management Login")
+    username = st.text_input("Username")
+    password = st.text_input("Password", type="password")
+    if st.button("Login"):
         if username in CREDENTIALS and hash_password(password) == CREDENTIALS[username]["password_hash"]:
             st.session_state.auth.update({
                 "logged_in": True,
@@ -127,145 +125,134 @@ def login_ui():
             })
             safe_rerun()
         else:
-            st.sidebar.error("Invalid credentials.")
+            st.error("Invalid username or password.")
 
 def logout():
     st.session_state.auth = {"logged_in": False, "username": None, "role": None, "name": None}
     safe_rerun()
 
-# contractor UI
+# ---------------------------------------------------------
+# CONTRACTOR UI
+# ---------------------------------------------------------
 def contractor_ui():
-    st.subheader("👷 Contractor — Submit Stock Request")
+    st.header("👷 Contractor - Submit Stock Request")
     contractor_name = st.session_state.auth["name"]
     installer_name = st.text_input("Installer Name")
-    st.markdown("""<div class='card'><strong>Select stock items and quantities</strong></div>""", unsafe_allow_html=True)
-    col1, col2 = st.columns(2)
-    with col1:
-        meter_qty = st.number_input("DN15 Meter Quantity", min_value=0, value=0, step=1)
-    with col2:
-        keypad_qty = st.number_input("CIU Keypad Quantity", min_value=0, value=0, step=1)
+    dn15_qty = st.number_input("DN15 Meter Quantity", 0)
+    keypad_qty = st.number_input("CIU Keypad Quantity", 0)
     notes = st.text_area("Notes")
 
     if st.button("Submit Request"):
         if not installer_name:
-            st.warning("Please enter installer name")
-        elif meter_qty == 0 and keypad_qty == 0:
+            st.warning("Please enter installer name.")
+        elif dn15_qty == 0 and keypad_qty == 0:
             st.warning("Please request at least one item.")
         else:
             df = load_data()
-            base_id = generate_request_id()
-            if meter_qty > 0:
-                df = pd.concat([df, pd.DataFrame([{
-                    "Date_Requested": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                    "Request_ID": base_id + "-M",
-                    "Contractor_Name": contractor_name,
-                    "Installer_Name": installer_name,
-                    "Meter_Type": "DN15 Meter",
-                    "Requested_Qty": meter_qty,
-                    "Approved_Qty": "",
-                    "Photo_Path": "",
-                    "Status": "Pending Verification",
-                    "Contractor_Notes": notes,
-                    "City_Notes": "",
-                    "Decline_Reason": "",
-                    "Date_Approved": "",
-                    "Date_Received": "",
-                }])], ignore_index=True)
-            if keypad_qty > 0:
-                df = pd.concat([df, pd.DataFrame([{
-                    "Date_Requested": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                    "Request_ID": base_id + "-K",
-                    "Contractor_Name": contractor_name,
-                    "Installer_Name": installer_name,
-                    "Meter_Type": "CIU Keypad",
-                    "Requested_Qty": keypad_qty,
-                    "Approved_Qty": "",
-                    "Photo_Path": "",
-                    "Status": "Pending Verification",
-                    "Contractor_Notes": notes,
-                    "City_Notes": "",
-                    "Decline_Reason": "",
-                    "Date_Approved": "",
-                    "Date_Received": "",
-                }])], ignore_index=True)
+            rid = generate_request_id()
+            entry = {
+                "Date_Requested": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                "Request_ID": rid,
+                "Contractor_Name": contractor_name,
+                "Installer_Name": installer_name,
+                "DN15_Meter_Qty": dn15_qty,
+                "Keypad_Qty": keypad_qty,
+                "Approved_DN15": "",
+                "Approved_Keypad": "",
+                "Photo_Path": "",
+                "Status": "Pending Verification",
+                "Contractor_Notes": notes,
+                "City_Notes": "",
+                "Decline_Reason": "",
+                "Date_Approved": "",
+                "Date_Received": "",
+            }
+            df = pd.concat([df, pd.DataFrame([entry])], ignore_index=True)
             save_data(df)
-            st.success("Request(s) submitted under base ID " + base_id)
+            st.success(f"✅ Request submitted with ID {rid}")
 
-    st.markdown("---")
     st.subheader("📋 My Requests")
     df = load_data()
-    st.dataframe(df[df["Contractor_Name"] == contractor_name].sort_values(by="Date_Requested", ascending=False), use_container_width=True)
+    myreq = df[df["Contractor_Name"] == contractor_name]
+    st.dataframe(myreq, use_container_width=True)
 
-# city UI
+# ---------------------------------------------------------
+# CITY UI
+# ---------------------------------------------------------
 def city_ui():
-    st.subheader("🏙️ City — Verify Requests")
+    st.header("🏙️ City - Verify Requests")
     df = load_data()
-    pending = df[df["Status"] == "Pending Verification"].sort_values(by="Date_Requested")
+    pending = df[df["Status"] == "Pending Verification"]
     st.dataframe(pending, use_container_width=True)
     sel = st.selectbox("Select Request ID", [""] + pending["Request_ID"].tolist())
     if sel:
         row = df[df["Request_ID"] == sel].iloc[0]
-        st.write(row.to_dict())
-        qty = st.number_input("Approved Qty", 0, value=int(row["Requested_Qty"]))
+        st.write(row)
+        dn15_approved = st.number_input("Approve DN15 Meters", 0, value=int(row["DN15_Meter_Qty"]))
+        keypad_approved = st.number_input("Approve Keypads", 0, value=int(row["Keypad_Qty"]))
         photo = st.file_uploader("Upload proof photo", type=["jpg", "png"])
         notes = st.text_area("Notes")
         decline_reason = st.text_input("Decline reason")
-        col1, col2 = st.columns(2)
-        with col1:
-            if st.button("Approve"):
-                df.loc[df["Request_ID"] == sel, "Approved_Qty"] = qty
-                ppath = ""
-                if photo:
-                    dest = ISSUED_PHOTOS_DIR / f"{sel}_{photo.name}"
-                    with open(dest, "wb") as f:
-                        f.write(photo.getbuffer())
-                    ppath = str(dest)
-                df.loc[df["Request_ID"] == sel, "Photo_Path"] = ppath
-                df.loc[df["Request_ID"] == sel, "Status"] = "Approved / Issued"
-                df.loc[df["Request_ID"] == sel, "City_Notes"] = notes
-                df.loc[df["Request_ID"] == sel, "Date_Approved"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                save_data(df)
-                st.success("Approved and issued.")
-                safe_rerun()
-        with col2:
-            if st.button("Decline"):
-                if not decline_reason:
-                    st.warning("Provide a reason to decline.")
-                else:
-                    df.loc[df["Request_ID"] == sel, "Status"] = "Declined"
-                    df.loc[df["Request_ID"] == sel, "Decline_Reason"] = decline_reason
-                    df.loc[df["Request_ID"] == sel, "City_Notes"] = notes
-                    save_data(df)
-                    st.error("Declined.")
-                    safe_rerun()
 
-# installer UI
+        if st.button("Approve"):
+            df.loc[df["Request_ID"] == sel, "Approved_DN15"] = dn15_approved
+            df.loc[df["Request_ID"] == sel, "Approved_Keypad"] = keypad_approved
+            ppath = ""
+            if photo:
+                dest = PHOTO_DIR / f"{sel}_{photo.name}"
+                with open(dest, "wb") as f:
+                    f.write(photo.getbuffer())
+                ppath = str(dest)
+            df.loc[df["Request_ID"] == sel, "Photo_Path"] = ppath
+            df.loc[df["Request_ID"] == sel, "Status"] = "Approved / Issued"
+            df.loc[df["Request_ID"] == sel, "City_Notes"] = notes
+            df.loc[df["Request_ID"] == sel, "Date_Approved"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            save_data(df)
+            st.success("✅ Approved and issued.")
+            safe_rerun()
+
+        if st.button("Decline"):
+            df.loc[df["Request_ID"] == sel, "Status"] = "Declined"
+            df.loc[df["Request_ID"] == sel, "Decline_Reason"] = decline_reason
+            save_data(df)
+            st.error("❌ Declined.")
+            safe_rerun()
+
+# ---------------------------------------------------------
+# INSTALLER UI
+# ---------------------------------------------------------
 def installer_ui():
-    st.subheader("🔧 Installer — Mark Received Stock")
+    st.header("🔧 Installer - Mark Received Stock")
     df = load_data()
     installer = st.session_state.auth["name"].strip().lower()
-    assigned = df[df["Installer_Name"].str.lower() == installer]
-    assigned = assigned[assigned["Status"].str.contains("Approved", na=False)]
-    st.dataframe(assigned.sort_values(by="Date_Approved", ascending=False), use_container_width=True)
-    sel = st.selectbox("Mark as received (Request ID)", [""] + assigned["Request_ID"].tolist())
-    if sel and st.button("Mark as Received"):
+    approved = df[df["Installer_Name"].str.lower() == installer]
+    approved = approved[approved["Status"].str.contains("Approved", na=False)]
+    st.dataframe(approved, use_container_width=True)
+
+    sel = st.selectbox("Mark as received (Request ID)", [""] + approved["Request_ID"].tolist())
+    if sel and st.button("✅ Mark as Received"):
         df.loc[df["Request_ID"] == sel, "Status"] = "Received"
         df.loc[df["Request_ID"] == sel, "Date_Received"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         save_data(df)
         st.success(f"Request {sel} marked as received.")
         safe_rerun()
 
-# manager UI
+# ---------------------------------------------------------
+# MANAGER UI
+# ---------------------------------------------------------
 def manager_ui():
-    st.subheader("📊 Manager — Reconciliation & Export")
+    st.header("📊 Manager - Reconciliation & Export")
     df = load_data()
-    st.dataframe(df.sort_values(by="Date_Requested", ascending=False), use_container_width=True)
+    st.dataframe(df, use_container_width=True)
+
     total = len(df)
     pending = (df["Status"] == "Pending Verification").sum()
     approved = (df["Status"].str.contains("Approved", na=False)).sum()
     declined = (df["Status"] == "Declined").sum()
     received = (df["Status"] == "Received").sum()
-    st.markdown(f"**Summary** — Total: {total} | Pending: {pending} | Approved: {approved} | Declined: {declined} | Received: {received}")
+
+    st.subheader("Summary")
+    st.write(f"Total: {total} | Pending: {pending} | Approved: {approved} | Declined: {declined} | Received: {received}")
 
     st.download_button("📥 Download CSV", data=df.to_csv(index=False), file_name="stock_requests.csv", mime="text/csv")
 
@@ -277,31 +264,50 @@ def manager_ui():
         elems.append(Paragraph("<b>Acucomm Stock Report</b>", styles['Title']))
         elems.append(Paragraph(datetime.now().strftime("%Y-%m-%d %H:%M:%S"), styles['Normal']))
         elems.append(Spacer(1, 12))
-        data_summary = [["Metric", "Count"], ["Total", total], ["Pending", pending], ["Approved", approved], ["Declined", declined], ["Received", received]]
+        data_summary = [
+            ["Metric", "Count"],
+            ["Total", total],
+            ["Pending", pending],
+            ["Approved", approved],
+            ["Declined", declined],
+            ["Received", received],
+        ]
         table = Table(data_summary)
-        table.setStyle(TableStyle([("BACKGROUND", (0, 0), (-1, 0), colors.grey), ("TEXTCOLOR", (0, 0), (-1, 0), colors.whitesmoke),
-                                   ("ALIGN", (0, 0), (-1, -1), "CENTER"), ("GRID", (0, 0), (-1, -1), 1, colors.black)]))
+        table.setStyle(TableStyle([
+            ("BACKGROUND", (0, 0), (-1, 0), colors.grey),
+            ("TEXTCOLOR", (0, 0), (-1, 0), colors.whitesmoke),
+            ("ALIGN", (0, 0), (-1, -1), "CENTER"),
+            ("GRID", (0, 0), (-1, -1), 1, colors.black),
+        ]))
         elems.append(table)
         elems.append(Spacer(1, 20))
         elems.append(Paragraph("<b>Detailed Records</b>", styles['Heading2']))
         data_table = [df.columns.tolist()] + df.values.tolist()
         t = Table(data_table, repeatRows=1)
-        t.setStyle(TableStyle([("GRID", (0, 0), (-1, -1), 0.25, colors.black), ("BACKGROUND", (0, 0), (-1, 0), colors.lightgrey)]))
+        t.setStyle(TableStyle([
+            ("GRID", (0, 0), (-1, -1), 0.25, colors.black),
+            ("BACKGROUND", (0, 0), (-1, 0), colors.lightgrey),
+        ]))
         elems.append(t)
         doc.build(elems)
         st.success(f"PDF generated: {pdf_path.name}")
         with open(pdf_path, "rb") as f:
             st.download_button("⬇️ Download PDF", f, file_name=pdf_path.name)
 
-# main
+# ---------------------------------------------------------
+# ROLE ROUTING
+# ---------------------------------------------------------
 if not st.session_state.auth["logged_in"]:
     login_ui()
 else:
-    st.sidebar.markdown(f"<div style='text-align:center;padding:8px'><img src='assets/acucomm_logo.jpg' width=160/></div>", unsafe_allow_html=True)
-    st.sidebar.write(f"Signed in as **{st.session_state.auth['name']}**  
-Role: **{st.session_state.auth['role']}**")
+    st.sidebar.image("assets/acucomm_logo.jpg", use_container_width=True)
+    st.sidebar.markdown("### Acucomm Stock Management")
+    st.sidebar.write(
+        f"Signed in as **{st.session_state.auth['name']}** ({st.session_state.auth['role']})"
+    )
     if st.sidebar.button("Logout"):
         logout()
+
     role = st.session_state.auth["role"]
     if role == "contractor":
         contractor_ui()
