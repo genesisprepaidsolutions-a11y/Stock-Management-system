@@ -28,7 +28,7 @@ def hash_password(p):
 
 raw_users = {
     "Deezlo": {"name": "Deezlo", "password": "Deezlo123", "role": "contractor"},
-    "ethekwini": {"name": "ethekwini", "password": "ethwkwini123", "role": "city"},
+    "ethekwini": {"name": "ethekwini", "password": "ethekwini123", "role": "city"},
     "installer1": {"name": "installer1", "password": "installer123", "role": "installer"},
     "Reece": {"name": "Reece", "password": "Reece123!", "role": "manager"},
 }
