@@ -10,7 +10,7 @@ from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, 
 from reportlab.lib.styles import getSampleStyleSheet
 import os
 
-st.set_page_config(page_title="Smart Meter Stock Workflow", page_icon="📦", layout="wide")
+st.set_page_config(page_title="Acucomm Stock Management", page_icon="📦", layout="wide")
 
 # === Directories ===
 ROOT = Path(__file__).parent
