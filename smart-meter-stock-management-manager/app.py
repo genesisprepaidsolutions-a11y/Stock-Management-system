@@ -269,7 +269,7 @@ def login_ui():
         with login_col2:
             # placeholder for future actions (e.g., "Forgot password")
             if st.button("Need help?"):
-                st.info("Contact Acucomm support: support@acucomm.local")
+                st.info("Contact Acucomm support: reece@acucomm.co.za")
 
         st.write("")
         st.markdown("<div class='small-note'>Use your contractor/city/installer credentials. Example contractor: <b>Nimba</b> / <b>Nimba123</b></div>", unsafe_allow_html=True)
