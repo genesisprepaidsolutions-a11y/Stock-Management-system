@@ -23,11 +23,11 @@ for d in [DATA_DIR, PHOTO_DIR, ISSUED_PHOTOS_DIR, REPORT_DIR]:
 DATA_FILE = DATA_DIR / "stock_requests.csv"
 
 # === Try to display Acucomm logo ===
-logo_path = ROOT / "acucomm logo.jpeg"
+logo_path = ROOT / "acucomm logo.jpg"
 if logo_path.exists():
     st.image(str(logo_path), width=220)
 else:
-    st.warning("⚠️ 'acucomm logo.jpeg' not found in the folder. Place it next to this .py file.")
+    st.warning("⚠️ 'acucomm logo.jpg' not found in the folder. Place it next to this .py file.")
 
 st.title("📦 Smart Meter Stock Workflow")
 
