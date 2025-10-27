@@ -6,7 +6,7 @@ import hashlib
 from io import BytesIO
 from reportlab.lib.pagesizes import A4, landscape
 from reportlab.lib import colors
-from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
+from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, Image
 from reportlab.lib.styles import getSampleStyleSheet
 import os
 
@@ -21,6 +21,15 @@ REPORT_DIR = ROOT / "reports"
 for d in [DATA_DIR, PHOTO_DIR, ISSUED_PHOTOS_DIR, REPORT_DIR]:
     d.mkdir(parents=True, exist_ok=True)
 DATA_FILE = DATA_DIR / "stock_requests.csv"
+
+# === Try to display Acucomm logo ===
+logo_path = ROOT / "acucomm logo.jpeg"
+if logo_path.exists():
+    st.image(str(logo_path), width=220)
+else:
+    st.warning("⚠️ 'acucomm logo.jpeg' not found in the folder. Place it next to this .py file.")
+
+st.title("📦 Smart Meter Stock Workflow")
 
 # === User Database ===
 def hash_password(p):
@@ -234,18 +243,24 @@ def manager_ui():
     st.subheader("Summary")
     st.write(f"Total: {total} | Pending: {pending} | Approved: {approved} | Declined: {declined} | Received: {received}")
 
-    # Export CSV
     st.download_button("📥 Download CSV", data=df.to_csv(index=False), file_name="stock_requests.csv", mime="text/csv")
 
-    # Export PDF
+    # Export PDF with logo
     if st.button("📄 Generate PDF Report"):
         pdf_path = REPORT_DIR / f"stock_report_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf"
         doc = SimpleDocTemplate(str(pdf_path), pagesize=landscape(A4))
         styles = getSampleStyleSheet()
         elems = []
+
+        # Add logo to PDF
+        if logo_path.exists():
+            elems.append(Image(str(logo_path), width=100, height=50))
+            elems.append(Spacer(1, 10))
+
         elems.append(Paragraph("<b>Smart Meter Stock Report</b>", styles['Title']))
         elems.append(Paragraph(datetime.now().strftime("%Y-%m-%d %H:%M:%S"), styles['Normal']))
         elems.append(Spacer(1, 12))
+
         data_summary = [
             ["Metric", "Count"],
             ["Total", total],
