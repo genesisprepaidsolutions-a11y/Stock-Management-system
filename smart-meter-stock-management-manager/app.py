@@ -5,7 +5,7 @@ from PIL import Image
 #   PAGE CONFIGURATION
 # ============================================
 st.set_page_config(
-    page_title="Acucomm Stock Management",
+    page_title="Stock Management",
     layout="wide",
     page_icon="🟩"
 )
