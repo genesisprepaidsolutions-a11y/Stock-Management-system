@@ -22,14 +22,12 @@ for d in [DATA_DIR, PHOTO_DIR, ISSUED_PHOTOS_DIR, REPORT_DIR]:
     d.mkdir(parents=True, exist_ok=True)
 DATA_FILE = DATA_DIR / "stock_requests.csv"
 
-# === Try to display Acucomm logo ===
-logo_path = ROOT / "acucomm logo.jpg"
+# === Display Logo ===
+logo_path = ROOT / "Acucomm logo.jpg"
 if logo_path.exists():
-    st.image(str(logo_path), width=220)
-else:
-    st.warning("⚠️ 'acucomm logo.jpg' not found in the folder. Place it next to this .py file.")
-
-st.title("📦 Smart Meter Stock Workflow")
+    st.image(str(logo_path), use_container_width=False, width=200)
+st.markdown("<h1 style='text-align: center;'>Smart Meter Stock Workflow</h1>", unsafe_allow_html=True)
+st.markdown("---")
 
 # === User Database ===
 def hash_password(p):
@@ -243,9 +241,10 @@ def manager_ui():
     st.subheader("Summary")
     st.write(f"Total: {total} | Pending: {pending} | Approved: {approved} | Declined: {declined} | Received: {received}")
 
+    # Export CSV
     st.download_button("📥 Download CSV", data=df.to_csv(index=False), file_name="stock_requests.csv", mime="text/csv")
 
-    # Export PDF with logo
+    # Export PDF
     if st.button("📄 Generate PDF Report"):
         pdf_path = REPORT_DIR / f"stock_report_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf"
         doc = SimpleDocTemplate(str(pdf_path), pagesize=landscape(A4))
@@ -254,9 +253,7 @@ def manager_ui():
 
         # Add logo to PDF
         if logo_path.exists():
-            elems.append(Image(str(logo_path), width=100, height=50))
-            elems.append(Spacer(1, 10))
-
+            elems.append(Image(str(logo_path), width=120, height=60))
         elems.append(Paragraph("<b>Smart Meter Stock Report</b>", styles['Title']))
         elems.append(Paragraph(datetime.now().strftime("%Y-%m-%d %H:%M:%S"), styles['Normal']))
         elems.append(Spacer(1, 12))
