@@ -26,7 +26,7 @@ DATA_FILE = DATA_DIR / "stock_requests.csv"
 logo_path = ROOT / "Acucomm logo.jpg"
 if logo_path.exists():
     st.image(str(logo_path), use_container_width=False, width=200)
-st.markdown("<h1 style='text-align: center;'>Smart Meter Stock Workflow</h1>", unsafe_allow_html=True)
+st.markdown("<h1 style='text-align: center;'>Stock Management</h1>", unsafe_allow_html=True)
 st.markdown("---")
 
 # === User Database ===
