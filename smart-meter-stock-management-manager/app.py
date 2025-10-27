@@ -272,7 +272,7 @@ def login_ui():
                 st.info("Contact Acucomm support: reece@acucomm.co.za")
 
         st.write("")
-        st.markdown("<div class='small-note'>Use your contractor/city/installer credentials. Example contractor: <b>Nimba</b> / <b>Nimba123</b></div>", unsafe_allow_html=True)
+        st.markdown("<div class='small-note'>Use your contractor/city/installer credentials. Example contractor: , unsafe_allow_html=True)
 
     with cols[2]:
         st.write("")  # spacer
