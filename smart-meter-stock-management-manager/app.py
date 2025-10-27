@@ -5,7 +5,7 @@ from PIL import Image
 #   PAGE CONFIGURATION
 # ============================================
 st.set_page_config(
-    page_title="Stock Management",
+    page_title="Acucomm Stock Management",
     layout="wide",
     page_icon="🟩"
 )
@@ -80,7 +80,7 @@ def login_page():
         st.warning("Logo not found — please ensure 'Acucomm logo.jpg' is in the same directory.")
 
     # Title and subtitle
-    st.markdown(f"<h2 style='color:{ACUCOMM_GREEN}; margin-bottom:0;'>Acucomm Stock Management</h2>", unsafe_allow_html=True)
+    st.markdown(f"<h2 style='color:{ACUCOMM_GREEN}; margin-bottom:0;'>Stock Management</h2>", unsafe_allow_html=True)
     st.markdown("<p style='color:gray; font-size:14px;'>Use your contractor / city / installer credentials to access the system.</p>", unsafe_allow_html=True)
 
     # Login form
