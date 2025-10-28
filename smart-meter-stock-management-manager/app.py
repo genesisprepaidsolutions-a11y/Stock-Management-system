@@ -9,7 +9,7 @@ from reportlab.lib import colors
 from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, Image
 from reportlab.lib.styles import getSampleStyleSheet
 import os
-import smtplib
+import smtplib, ssl
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from dotenv import load_dotenv
@@ -39,11 +39,11 @@ DATA_FILE = DATA_DIR / "stock_requests.csv"
 # === Display Logo ===
 logo_path = ROOT / "Acucomm logo.jpg"
 if logo_path.exists():
-    st.image(str(logo_path), use_container_width=False, width=200)
+    st.image(str(logo_path), use_column_width=False, width=200)
 st.markdown("<h1 style='text-align: center;'>Stock Management</h1>", unsafe_allow_html=True)
 st.markdown("---")
 
-# === Email Utility with STARTTLS & full error ===
+# === Email Utility with STARTTLS & Debug ===
 def send_email(to_email, subject, body):
     try:
         msg = MIMEMultipart()
@@ -53,20 +53,18 @@ def send_email(to_email, subject, body):
         msg.attach(MIMEText(body, "plain"))
 
         server = smtplib.SMTP(SMTP_SERVER, SMTP_PORT)
-        server.set_debuglevel(1)  # SMTP debug prints in console
+        server.set_debuglevel(1)  # DEBUG prints to console
         server.ehlo()
         server.starttls()
         server.ehlo()
         server.login(SMTP_USER, SMTP_PASS)
         server.sendmail(FROM_EMAIL, to_email, msg.as_string())
         server.quit()
-        print(f"[EMAIL SENT] To: {to_email} | Subject: {subject}")
+        st.success(f"[EMAIL SENT] To: {to_email} | Subject: {subject}")
         return True, "Email sent successfully!"
     except Exception as e:
-        import traceback
-        err = traceback.format_exc()
-        print(f"[EMAIL FAILED] To: {to_email} | Subject: {subject} | Error:\n{err}")
-        return False, f"Email failed:\n{err}"
+        st.error(f"[EMAIL FAILED] To: {to_email} | Subject: {subject} | Error: {e}")
+        return False, f"Email failed: {e}"
 
 # === User Database ===
 def hash_password(p):
@@ -93,16 +91,29 @@ CREDENTIALS = {
 def load_data():
     if DATA_FILE.exists():
         try:
-            return pd.read_csv(DATA_FILE)
-        except Exception:
-            pass
+            df = pd.read_csv(DATA_FILE)
+            # Ensure correct dtypes
+            numeric_cols = ["Requested_Qty", "Approved_Qty"]
+            for c in numeric_cols:
+                if c in df.columns:
+                    df[c] = pd.to_numeric(df[c], errors="coerce").fillna(0).astype(int)
+            date_cols = ["Date_Requested", "Date_Approved", "Date_Received"]
+            for c in date_cols:
+                if c in df.columns:
+                    df[c] = pd.to_datetime(df[c], errors="coerce")
+            return df
+        except Exception as e:
+            st.error(f"Error loading CSV: {e}")
     cols = [
         "Date_Requested", "Request_ID", "Contractor_Name", "Installer_Name",
         "Meter_Type", "Requested_Qty", "Approved_Qty", "Photo_Path",
         "Status", "Contractor_Notes", "City_Notes", "Decline_Reason",
         "Date_Approved", "Date_Received"
     ]
-    return pd.DataFrame(columns=cols)
+    df = pd.DataFrame(columns=cols)
+    df["Requested_Qty"] = df["Requested_Qty"].astype(int)
+    df["Approved_Qty"] = df["Approved_Qty"].astype(int)
+    return df
 
 def save_data(df):
     df.to_csv(DATA_FILE, index=False)
@@ -115,7 +126,7 @@ if "auth" not in st.session_state:
 
 def safe_rerun():
     try:
-        st.rerun()
+        st.experimental_rerun()
     except Exception:
         pass
 
@@ -168,12 +179,12 @@ def contractor_ui():
 
             def add_record(type_name, qty):
                 df.loc[len(df)] = [
-                    datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                    datetime.now(),
                     f"{rid}-{type_name[:1]}",
                     contractor_name,
                     installer_name,
                     type_name,
-                    qty, "", "", "Pending Verification", notes, "", "", "", ""
+                    qty, 0, "", "Pending Verification", notes, "", "", "", ""
                 ]
 
             if meter_qty > 0:
@@ -187,18 +198,15 @@ def contractor_ui():
     st.subheader("📋 My Requests")
     df = load_data()
     myreq = df[df["Contractor_Name"] == contractor_name]
-    st.dataframe(myreq, use_container_width=True)
+    st.dataframe(myreq, width="stretch")
 
 # === City UI ===
 def city_ui():
     st.header("🏙️ City - Verify Requests")
     df = load_data()
     pending = df[df["Status"] == "Pending Verification"]
-    st.dataframe(pending, use_container_width=True)
+    st.dataframe(pending, width="stretch")
     sel = st.selectbox("Select Request ID", [""] + pending["Request_ID"].tolist())
-
-    email_status = None
-
     if sel:
         row = df[df["Request_ID"] == sel].iloc[0]
         st.write(row)
@@ -218,19 +226,19 @@ def city_ui():
             df.loc[df["Request_ID"] == sel, "Photo_Path"] = ppath
             df.loc[df["Request_ID"] == sel, "Status"] = "Approved / Issued"
             df.loc[df["Request_ID"] == sel, "City_Notes"] = notes
-            df.loc[df["Request_ID"] == sel, "Date_Approved"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            df.loc[df["Request_ID"] == sel, "Date_Approved"] = datetime.now()
             save_data(df)
 
+            # Email contractor
             contractor_name = row["Contractor_Name"]
             contractor_email = CREDENTIALS.get(contractor_name, {}).get("email")
             if contractor_email:
-                success, email_status = send_email(
-                    contractor_email,
-                    f"Stock Request {sel} Approved",
-                    f"Your stock request {sel} has been approved and issued.\n\nApproved Qty: {qty}\nNotes: {notes}"
-                )
+                send_email(contractor_email,
+                           f"Stock Request {sel} Approved",
+                           f"Your stock request {sel} has been approved and issued.\n\nApproved Qty: {qty}\nNotes: {notes}")
 
             st.success("✅ Approved and issued.")
+            safe_rerun()
 
         if st.button("Decline"):
             df.loc[df["Request_ID"] == sel, "Status"] = "Declined"
@@ -240,17 +248,12 @@ def city_ui():
             contractor_name = row["Contractor_Name"]
             contractor_email = CREDENTIALS.get(contractor_name, {}).get("email")
             if contractor_email:
-                success, email_status = send_email(
-                    contractor_email,
-                    f"Stock Request {sel} Declined",
-                    f"Your stock request {sel} was declined.\nReason: {decline_reason}"
-                )
+                send_email(contractor_email,
+                           f"Stock Request {sel} Declined",
+                           f"Your stock request {sel} was declined.\nReason: {decline_reason}")
 
             st.error("❌ Declined.")
-
-    # Display email error/success
-    if email_status:
-        st.info(f"📧 Email Status:\n{email_status}")
+            safe_rerun()
 
 # === Installer UI ===
 def installer_ui():
@@ -259,12 +262,12 @@ def installer_ui():
     installer = st.session_state.auth["name"].strip().lower()
     approved = df[df["Installer_Name"].str.lower() == installer]
     approved = approved[approved["Status"].str.contains("Approved", na=False)]
-    st.dataframe(approved, use_container_width=True)
+    st.dataframe(approved, width="stretch")
 
     sel = st.selectbox("Mark as received (Request ID)", [""] + approved["Request_ID"].tolist())
     if sel and st.button("✅ Mark as Received"):
         df.loc[df["Request_ID"] == sel, "Status"] = "Received"
-        df.loc[df["Request_ID"] == sel, "Date_Received"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        df.loc[df["Request_ID"] == sel, "Date_Received"] = datetime.now()
         save_data(df)
         st.success(f"Request {sel} marked as received.")
         safe_rerun()
@@ -273,7 +276,7 @@ def installer_ui():
 def manager_ui():
     st.header("📊 Manager - Reconciliation & Export")
     df = load_data()
-    st.dataframe(df, use_container_width=True)
+    st.dataframe(df, width="stretch")
 
     total = len(df)
     pending = (df["Status"] == "Pending Verification").sum()
