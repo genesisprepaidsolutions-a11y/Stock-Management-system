@@ -9,7 +9,7 @@ from reportlab.lib import colors
 from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, Image
 from reportlab.lib.styles import getSampleStyleSheet
 import os
-import smtplib, ssl
+import smtplib
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from dotenv import load_dotenv
@@ -18,7 +18,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 SMTP_SERVER = os.getenv("SMTP_SERVER")
-SMTP_PORT = int(os.getenv("SMTP_PORT", "465"))
+SMTP_PORT = int(os.getenv("SMTP_PORT", "587"))
 SMTP_USER = os.getenv("SMTP_USER")
 SMTP_PASS = os.getenv("SMTP_PASS")
 FROM_EMAIL = os.getenv("FROM_EMAIL")
@@ -43,9 +43,8 @@ if logo_path.exists():
 st.markdown("<h1 style='text-align: center;'>Stock Management</h1>", unsafe_allow_html=True)
 st.markdown("---")
 
-# === Email Utility ===
+# === Email Utility with STARTTLS & Debug ===
 def send_email(to_email, subject, body):
-    print(f"Attempting email to {to_email}...")
     try:
         msg = MIMEMultipart()
         msg["From"] = FROM_EMAIL
@@ -53,14 +52,18 @@ def send_email(to_email, subject, body):
         msg["Subject"] = subject
         msg.attach(MIMEText(body, "plain"))
 
-        context = ssl.create_default_context()
-        with smtplib.SMTP_SSL(SMTP_SERVER, SMTP_PORT, context=context) as server:
-            server.login(SMTP_USER, SMTP_PASS)
-            server.sendmail(FROM_EMAIL, to_email, msg.as_string())
-        print(f"✅ Email sent to {to_email}")
+        server = smtplib.SMTP(SMTP_SERVER, SMTP_PORT)
+        server.set_debuglevel(1)  # Enable SMTP debug output in terminal
+        server.ehlo()
+        server.starttls()
+        server.ehlo()
+        server.login(SMTP_USER, SMTP_PASS)
+        server.sendmail(FROM_EMAIL, to_email, msg.as_string())
+        server.quit()
+        print(f"[EMAIL SENT] To: {to_email} | Subject: {subject}")
         return True, "Email sent successfully!"
     except Exception as e:
-        print(f"❌ Email failed: {e}")
+        print(f"[EMAIL FAILED] To: {to_email} | Subject: {subject} | Error: {e}")
         return False, f"Email failed: {e}"
 
 # === User Database ===
@@ -213,29 +216,13 @@ def city_ui():
             df.loc[df["Request_ID"] == sel, "Date_Approved"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             save_data(df)
 
-            # Email notifications
+            # Email contractor
             contractor_name = row["Contractor_Name"]
             contractor_email = CREDENTIALS.get(contractor_name, {}).get("email")
-            installer_name = row["Installer_Name"]
-            installer_email = None
-            for u, v in CREDENTIALS.items():
-                if v["name"].lower() == installer_name.lower():
-                    installer_email = v["email"]
-                    break
-            manager_email = CREDENTIALS.get("Reece", {}).get("email")
-
             if contractor_email:
                 send_email(contractor_email,
                            f"Stock Request {sel} Approved",
                            f"Your stock request {sel} has been approved and issued.\n\nApproved Qty: {qty}\nNotes: {notes}")
-            if installer_email:
-                send_email(installer_email,
-                           f"Stock Request {sel} Assigned",
-                           f"You have stock to deliver for request {sel}.\nApproved Qty: {qty}")
-            if manager_email:
-                send_email(manager_email,
-                           f"Stock Request {sel} Issued",
-                           f"Stock request {sel} has been issued to installer {installer_name}.")
 
             st.success("✅ Approved and issued.")
             safe_rerun()
@@ -269,21 +256,6 @@ def installer_ui():
         df.loc[df["Request_ID"] == sel, "Status"] = "Received"
         df.loc[df["Request_ID"] == sel, "Date_Received"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         save_data(df)
-
-        # Email notifications to Contractor and Manager
-        row = df[df["Request_ID"] == sel].iloc[0]
-        contractor_name = row["Contractor_Name"]
-        contractor_email = CREDENTIALS.get(contractor_name, {}).get("email")
-        manager_email = CREDENTIALS.get("Reece", {}).get("email")
-        if contractor_email:
-            send_email(contractor_email,
-                       f"Stock Request {sel} Received",
-                       f"Installer {installer} has marked stock request {sel} as received.")
-        if manager_email:
-            send_email(manager_email,
-                       f"Stock Request {sel} Received",
-                       f"Installer {installer} has marked stock request {sel} as received.")
-
         st.success(f"Request {sel} marked as received.")
         safe_rerun()
 
