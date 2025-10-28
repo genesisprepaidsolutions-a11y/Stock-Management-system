@@ -43,7 +43,7 @@ if logo_path.exists():
 st.markdown("<h1 style='text-align: center;'>Stock Management</h1>", unsafe_allow_html=True)
 st.markdown("---")
 
-# === Email Utility with STARTTLS & debug in app ===
+# === Email Utility with STARTTLS & full error ===
 def send_email(to_email, subject, body):
     try:
         msg = MIMEMultipart()
@@ -53,22 +53,20 @@ def send_email(to_email, subject, body):
         msg.attach(MIMEText(body, "plain"))
 
         server = smtplib.SMTP(SMTP_SERVER, SMTP_PORT)
-        server.set_debuglevel(1)  # Terminal debug
+        server.set_debuglevel(1)  # SMTP debug prints in console
         server.ehlo()
         server.starttls()
         server.ehlo()
         server.login(SMTP_USER, SMTP_PASS)
         server.sendmail(FROM_EMAIL, to_email, msg.as_string())
         server.quit()
-        success_msg = f"[EMAIL SENT] To: {to_email} | Subject: {subject}"
-        print(success_msg)
-        st.success(success_msg)
-        return True
+        print(f"[EMAIL SENT] To: {to_email} | Subject: {subject}")
+        return True, "Email sent successfully!"
     except Exception as e:
-        err_msg = f"[EMAIL FAILED] To: {to_email} | Subject: {subject} | Error: {e}"
-        print(err_msg)
-        st.error(err_msg)
-        return False
+        import traceback
+        err = traceback.format_exc()
+        print(f"[EMAIL FAILED] To: {to_email} | Subject: {subject} | Error:\n{err}")
+        return False, f"Email failed:\n{err}"
 
 # === User Database ===
 def hash_password(p):
@@ -198,6 +196,9 @@ def city_ui():
     pending = df[df["Status"] == "Pending Verification"]
     st.dataframe(pending, use_container_width=True)
     sel = st.selectbox("Select Request ID", [""] + pending["Request_ID"].tolist())
+
+    email_status = None
+
     if sel:
         row = df[df["Request_ID"] == sel].iloc[0]
         st.write(row)
@@ -220,16 +221,16 @@ def city_ui():
             df.loc[df["Request_ID"] == sel, "Date_Approved"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             save_data(df)
 
-            # Email contractor with Streamlit feedback
             contractor_name = row["Contractor_Name"]
             contractor_email = CREDENTIALS.get(contractor_name, {}).get("email")
             if contractor_email:
-                send_email(contractor_email,
-                           f"Stock Request {sel} Approved",
-                           f"Your stock request {sel} has been approved and issued.\n\nApproved Qty: {qty}\nNotes: {notes}")
+                success, email_status = send_email(
+                    contractor_email,
+                    f"Stock Request {sel} Approved",
+                    f"Your stock request {sel} has been approved and issued.\n\nApproved Qty: {qty}\nNotes: {notes}"
+                )
 
             st.success("✅ Approved and issued.")
-            safe_rerun()
 
         if st.button("Decline"):
             df.loc[df["Request_ID"] == sel, "Status"] = "Declined"
@@ -239,12 +240,17 @@ def city_ui():
             contractor_name = row["Contractor_Name"]
             contractor_email = CREDENTIALS.get(contractor_name, {}).get("email")
             if contractor_email:
-                send_email(contractor_email,
-                           f"Stock Request {sel} Declined",
-                           f"Your stock request {sel} was declined.\nReason: {decline_reason}")
+                success, email_status = send_email(
+                    contractor_email,
+                    f"Stock Request {sel} Declined",
+                    f"Your stock request {sel} was declined.\nReason: {decline_reason}"
+                )
 
             st.error("❌ Declined.")
-            safe_rerun()
+
+    # Display email error/success
+    if email_status:
+        st.info(f"📧 Email Status:\n{email_status}")
 
 # === Installer UI ===
 def installer_ui():
