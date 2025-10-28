@@ -65,9 +65,9 @@ def hash_password(p):
     return hashlib.sha256(p.encode()).hexdigest()
 
 raw_users = {
-    "Deezlo": {"name": "Deezlo", "password": "Deezlo123", "role": "contractor", "email": "reece@acucomm.co.za"},
-    "ethekwini": {"name": "ethekwini", "password": "ethekwini123", "role": "city", "email": "city@acucomm.co.za"},
-    "installer1": {"name": "installer1", "password": "installer123", "role": "installer", "email": "installer@acucomm.co.za"},
+    "Deezlo": {"name": "Deezlo", "password": "Deezlo123", "role": "contractor", "email": "thando@acucomm.co.za"},
+    "ethekwini": {"name": "ethekwini", "password": "ethekwini123", "role": "city", "email": "amanda@acucomm.co.za"},
+    "installer1": {"name": "installer1", "password": "installer123", "role": "installer", "email": "kenzlee@acucomm.co.za"},
     "Reece": {"name": "Reece", "password": "Reece123!", "role": "manager", "email": "reece@acucomm.co.za"},
 }
 
