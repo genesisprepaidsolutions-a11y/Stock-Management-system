@@ -24,8 +24,8 @@ for d in [DATA_DIR, PHOTO_DIR, ISSUED_PHOTOS_DIR, REPORT_DIR]:
 DATA_FILE = DATA_DIR / "stock_requests.csv"
 
 # === Exchange Email Config ===
-EXCHANGE_EMAIL = "noreply@acucomm.co.za"  # change to your actual service email
-EXCHANGE_PASSWORD = "YourExchangePassword"  # use env variable in production
+EXCHANGE_EMAIL = "reece@acucomm.co.za"  # change to your actual service email
+EXCHANGE_PASSWORD = "P*046222319301uh"  # use env variable in production
 EXCHANGE_SERVER = "outlook.office365.com"  # for MS Exchange Online (Office 365)
 
 # === Helper: Send Email ===
