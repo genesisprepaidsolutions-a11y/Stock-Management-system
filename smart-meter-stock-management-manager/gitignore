@@ -1,0 +1,2 @@
+# Streamlit secrets (never upload passwords)
+.streamlit/secrets.toml
