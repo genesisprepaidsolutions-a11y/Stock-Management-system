@@ -45,6 +45,7 @@ st.markdown("---")
 
 # === Email Utility ===
 def send_email(to_email, subject, body):
+    print(f"Attempting email to {to_email}...")
     try:
         msg = MIMEMultipart()
         msg["From"] = FROM_EMAIL
@@ -56,8 +57,10 @@ def send_email(to_email, subject, body):
         with smtplib.SMTP_SSL(SMTP_SERVER, SMTP_PORT, context=context) as server:
             server.login(SMTP_USER, SMTP_PASS)
             server.sendmail(FROM_EMAIL, to_email, msg.as_string())
+        print(f"✅ Email sent to {to_email}")
         return True, "Email sent successfully!"
     except Exception as e:
+        print(f"❌ Email failed: {e}")
         return False, f"Email failed: {e}"
 
 # === User Database ===
@@ -67,7 +70,7 @@ def hash_password(p):
 raw_users = {
     "Deezlo": {"name": "Deezlo", "password": "Deezlo123", "role": "contractor", "email": "thando@acucomm.co.za"},
     "ethekwini": {"name": "ethekwini", "password": "ethekwini123", "role": "city", "email": "amanda@acucomm.co.za"},
-    "installer1": {"name": "installer1", "password": "installer123", "role": "installer", "email": "kenzlee@acucomm.co.za"},
+    "installer1": {"name": "installer1", "password": "installer123", "role": "installer", "email": "alistair@acucomm.co.za"},
     "Reece": {"name": "Reece", "password": "Reece123!", "role": "manager", "email": "reece@acucomm.co.za"},
 }
 
@@ -210,13 +213,29 @@ def city_ui():
             df.loc[df["Request_ID"] == sel, "Date_Approved"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             save_data(df)
 
-            # Email contractor
+            # Email notifications
             contractor_name = row["Contractor_Name"]
             contractor_email = CREDENTIALS.get(contractor_name, {}).get("email")
+            installer_name = row["Installer_Name"]
+            installer_email = None
+            for u, v in CREDENTIALS.items():
+                if v["name"].lower() == installer_name.lower():
+                    installer_email = v["email"]
+                    break
+            manager_email = CREDENTIALS.get("Reece", {}).get("email")
+
             if contractor_email:
                 send_email(contractor_email,
                            f"Stock Request {sel} Approved",
                            f"Your stock request {sel} has been approved and issued.\n\nApproved Qty: {qty}\nNotes: {notes}")
+            if installer_email:
+                send_email(installer_email,
+                           f"Stock Request {sel} Assigned",
+                           f"You have stock to deliver for request {sel}.\nApproved Qty: {qty}")
+            if manager_email:
+                send_email(manager_email,
+                           f"Stock Request {sel} Issued",
+                           f"Stock request {sel} has been issued to installer {installer_name}.")
 
             st.success("✅ Approved and issued.")
             safe_rerun()
@@ -226,7 +245,6 @@ def city_ui():
             df.loc[df["Request_ID"] == sel, "Decline_Reason"] = decline_reason
             save_data(df)
 
-            # Email contractor
             contractor_name = row["Contractor_Name"]
             contractor_email = CREDENTIALS.get(contractor_name, {}).get("email")
             if contractor_email:
@@ -251,6 +269,21 @@ def installer_ui():
         df.loc[df["Request_ID"] == sel, "Status"] = "Received"
         df.loc[df["Request_ID"] == sel, "Date_Received"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         save_data(df)
+
+        # Email notifications to Contractor and Manager
+        row = df[df["Request_ID"] == sel].iloc[0]
+        contractor_name = row["Contractor_Name"]
+        contractor_email = CREDENTIALS.get(contractor_name, {}).get("email")
+        manager_email = CREDENTIALS.get("Reece", {}).get("email")
+        if contractor_email:
+            send_email(contractor_email,
+                       f"Stock Request {sel} Received",
+                       f"Installer {installer} has marked stock request {sel} as received.")
+        if manager_email:
+            send_email(manager_email,
+                       f"Stock Request {sel} Received",
+                       f"Installer {installer} has marked stock request {sel} as received.")
+
         st.success(f"Request {sel} marked as received.")
         safe_rerun()
 
@@ -332,4 +365,3 @@ else:
         manager_ui()
     else:
         st.error("Unknown role.")
-
