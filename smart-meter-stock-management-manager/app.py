@@ -9,7 +9,21 @@ from reportlab.lib import colors
 from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, Image
 from reportlab.lib.styles import getSampleStyleSheet
 import os
+import smtplib, ssl
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
+from dotenv import load_dotenv
 
+# === Load environment variables ===
+load_dotenv()
+
+SMTP_SERVER = os.getenv("SMTP_SERVER")
+SMTP_PORT = int(os.getenv("SMTP_PORT", "465"))
+SMTP_USER = os.getenv("SMTP_USER")
+SMTP_PASS = os.getenv("SMTP_PASS")
+FROM_EMAIL = os.getenv("FROM_EMAIL")
+
+# === Streamlit Config ===
 st.set_page_config(page_title="Acucomm Stock Management", page_icon="📦", layout="wide")
 
 # === Directories ===
@@ -29,15 +43,32 @@ if logo_path.exists():
 st.markdown("<h1 style='text-align: center;'>Stock Management</h1>", unsafe_allow_html=True)
 st.markdown("---")
 
+# === Email Utility ===
+def send_email(to_email, subject, body):
+    try:
+        msg = MIMEMultipart()
+        msg["From"] = FROM_EMAIL
+        msg["To"] = to_email
+        msg["Subject"] = subject
+        msg.attach(MIMEText(body, "plain"))
+
+        context = ssl.create_default_context()
+        with smtplib.SMTP_SSL(SMTP_SERVER, SMTP_PORT, context=context) as server:
+            server.login(SMTP_USER, SMTP_PASS)
+            server.sendmail(FROM_EMAIL, to_email, msg.as_string())
+        return True, "Email sent successfully!"
+    except Exception as e:
+        return False, f"Email failed: {e}"
+
 # === User Database ===
 def hash_password(p):
     return hashlib.sha256(p.encode()).hexdigest()
 
 raw_users = {
-    "Deezlo": {"name": "Deezlo", "password": "Deezlo123", "role": "contractor"},
-    "ethekwini": {"name": "ethekwini", "password": "ethekwini123", "role": "city"},
-    "installer1": {"name": "installer1", "password": "installer123", "role": "installer"},
-    "Reece": {"name": "Reece", "password": "Reece123!", "role": "manager"},
+    "Deezlo": {"name": "Deezlo", "password": "Deezlo123", "role": "contractor", "email": "reece@acucomm.co.za"},
+    "ethekwini": {"name": "ethekwini", "password": "ethekwini123", "role": "city", "email": "city@acucomm.co.za"},
+    "installer1": {"name": "installer1", "password": "installer123", "role": "installer", "email": "installer@acucomm.co.za"},
+    "Reece": {"name": "Reece", "password": "Reece123!", "role": "manager", "email": "reece@acucomm.co.za"},
 }
 
 CREDENTIALS = {
@@ -45,6 +76,7 @@ CREDENTIALS = {
         "name": v["name"],
         "password_hash": hash_password(v["password"]),
         "role": v["role"],
+        "email": v["email"],
     }
     for u, v in raw_users.items()
 }
@@ -71,7 +103,7 @@ def generate_request_id():
     return f"REQ-{datetime.now().strftime('%Y%m%d%H%M%S')}"
 
 if "auth" not in st.session_state:
-    st.session_state.auth = {"logged_in": False, "username": None, "role": None, "name": None}
+    st.session_state.auth = {"logged_in": False, "username": None, "role": None, "name": None, "email": None}
 
 def safe_rerun():
     try:
@@ -90,14 +122,15 @@ def login_ui():
                 "logged_in": True,
                 "username": username,
                 "role": CREDENTIALS[username]["role"],
-                "name": CREDENTIALS[username]["name"]
+                "name": CREDENTIALS[username]["name"],
+                "email": CREDENTIALS[username]["email"]
             })
             safe_rerun()
         else:
             st.error("Invalid credentials.")
 
 def logout():
-    st.session_state.auth = {"logged_in": False, "username": None, "role": None, "name": None}
+    st.session_state.auth = {"logged_in": False, "username": None, "role": None, "name": None, "email": None}
     safe_rerun()
 
 # === Contractor UI ===
@@ -125,43 +158,20 @@ def contractor_ui():
             df = load_data()
             rid = generate_request_id()
 
-            # DN15 Meter request
-            if meter_qty > 0:
-                df = pd.concat([df, pd.DataFrame([{
-                    "Date_Requested": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                    "Request_ID": f"{rid}-M",
-                    "Contractor_Name": contractor_name,
-                    "Installer_Name": installer_name,
-                    "Meter_Type": "DN15 Meter",
-                    "Requested_Qty": meter_qty,
-                    "Approved_Qty": "",
-                    "Photo_Path": "",
-                    "Status": "Pending Verification",
-                    "Contractor_Notes": notes,
-                    "City_Notes": "",
-                    "Decline_Reason": "",
-                    "Date_Approved": "",
-                    "Date_Received": "",
-                }])], ignore_index=True)
+            def add_record(type_name, qty):
+                df.loc[len(df)] = [
+                    datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                    f"{rid}-{type_name[:1]}",
+                    contractor_name,
+                    installer_name,
+                    type_name,
+                    qty, "", "", "Pending Verification", notes, "", "", "", ""
+                ]
 
-            # CIU Keypad request
+            if meter_qty > 0:
+                add_record("DN15 Meter", meter_qty)
             if keypad_qty > 0:
-                df = pd.concat([df, pd.DataFrame([{
-                    "Date_Requested": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                    "Request_ID": f"{rid}-K",
-                    "Contractor_Name": contractor_name,
-                    "Installer_Name": installer_name,
-                    "Meter_Type": "CIU Keypad",
-                    "Requested_Qty": keypad_qty,
-                    "Approved_Qty": "",
-                    "Photo_Path": "",
-                    "Status": "Pending Verification",
-                    "Contractor_Notes": notes,
-                    "City_Notes": "",
-                    "Decline_Reason": "",
-                    "Date_Approved": "",
-                    "Date_Received": "",
-                }])], ignore_index=True)
+                add_record("CIU Keypad", keypad_qty)
 
             save_data(df)
             st.success(f"✅ Request(s) submitted under base ID {rid}")
@@ -199,6 +209,15 @@ def city_ui():
             df.loc[df["Request_ID"] == sel, "City_Notes"] = notes
             df.loc[df["Request_ID"] == sel, "Date_Approved"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             save_data(df)
+
+            # Email contractor
+            contractor_name = row["Contractor_Name"]
+            contractor_email = CREDENTIALS.get(contractor_name, {}).get("email")
+            if contractor_email:
+                send_email(contractor_email,
+                           f"Stock Request {sel} Approved",
+                           f"Your stock request {sel} has been approved and issued.\n\nApproved Qty: {qty}\nNotes: {notes}")
+
             st.success("✅ Approved and issued.")
             safe_rerun()
 
@@ -206,6 +225,15 @@ def city_ui():
             df.loc[df["Request_ID"] == sel, "Status"] = "Declined"
             df.loc[df["Request_ID"] == sel, "Decline_Reason"] = decline_reason
             save_data(df)
+
+            # Email contractor
+            contractor_name = row["Contractor_Name"]
+            contractor_email = CREDENTIALS.get(contractor_name, {}).get("email")
+            if contractor_email:
+                send_email(contractor_email,
+                           f"Stock Request {sel} Declined",
+                           f"Your stock request {sel} was declined.\nReason: {decline_reason}")
+
             st.error("❌ Declined.")
             safe_rerun()
 
@@ -241,17 +269,14 @@ def manager_ui():
     st.subheader("Summary")
     st.write(f"Total: {total} | Pending: {pending} | Approved: {approved} | Declined: {declined} | Received: {received}")
 
-    # Export CSV
     st.download_button("📥 Download CSV", data=df.to_csv(index=False), file_name="stock_requests.csv", mime="text/csv")
 
-    # Export PDF
     if st.button("📄 Generate PDF Report"):
         pdf_path = REPORT_DIR / f"stock_report_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf"
         doc = SimpleDocTemplate(str(pdf_path), pagesize=landscape(A4))
         styles = getSampleStyleSheet()
         elems = []
 
-        # Add logo to PDF
         if logo_path.exists():
             elems.append(Image(str(logo_path), width=120, height=60))
         elems.append(Paragraph("<b>Smart Meter Stock Report</b>", styles['Title']))
@@ -307,3 +332,4 @@ else:
         manager_ui()
     else:
         st.error("Unknown role.")
+
