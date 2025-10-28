@@ -43,7 +43,7 @@ if logo_path.exists():
 st.markdown("<h1 style='text-align: center;'>Stock Management</h1>", unsafe_allow_html=True)
 st.markdown("---")
 
-# === Email Utility with STARTTLS & Debug ===
+# === Email Utility with STARTTLS & debug in app ===
 def send_email(to_email, subject, body):
     try:
         msg = MIMEMultipart()
@@ -53,18 +53,22 @@ def send_email(to_email, subject, body):
         msg.attach(MIMEText(body, "plain"))
 
         server = smtplib.SMTP(SMTP_SERVER, SMTP_PORT)
-        server.set_debuglevel(1)  # Enable SMTP debug output in terminal
+        server.set_debuglevel(1)  # Terminal debug
         server.ehlo()
         server.starttls()
         server.ehlo()
         server.login(SMTP_USER, SMTP_PASS)
         server.sendmail(FROM_EMAIL, to_email, msg.as_string())
         server.quit()
-        print(f"[EMAIL SENT] To: {to_email} | Subject: {subject}")
-        return True, "Email sent successfully!"
+        success_msg = f"[EMAIL SENT] To: {to_email} | Subject: {subject}"
+        print(success_msg)
+        st.success(success_msg)
+        return True
     except Exception as e:
-        print(f"[EMAIL FAILED] To: {to_email} | Subject: {subject} | Error: {e}")
-        return False, f"Email failed: {e}"
+        err_msg = f"[EMAIL FAILED] To: {to_email} | Subject: {subject} | Error: {e}"
+        print(err_msg)
+        st.error(err_msg)
+        return False
 
 # === User Database ===
 def hash_password(p):
@@ -216,7 +220,7 @@ def city_ui():
             df.loc[df["Request_ID"] == sel, "Date_Approved"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             save_data(df)
 
-            # Email contractor
+            # Email contractor with Streamlit feedback
             contractor_name = row["Contractor_Name"]
             contractor_email = CREDENTIALS.get(contractor_name, {}).get("email")
             if contractor_email:
