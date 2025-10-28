@@ -2,3 +2,4 @@ streamlit>=1.18
 pandas
 Pillow
 reportlab
+python-dotenv
