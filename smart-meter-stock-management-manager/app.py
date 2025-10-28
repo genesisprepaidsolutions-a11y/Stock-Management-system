@@ -1,3 +1,4 @@
+# app.py
 import streamlit as st
 import pandas as pd
 from datetime import datetime
@@ -9,6 +10,9 @@ from reportlab.lib import colors
 from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, Image
 from reportlab.lib.styles import getSampleStyleSheet
 import os
+import smtplib
+from email.mime.multipart import MIMEMultipart
+from email.mime.text import MIMEText
 
 st.set_page_config(page_title="Acucomm Stock Management", page_icon="📦", layout="wide")
 
@@ -22,6 +26,58 @@ for d in [DATA_DIR, PHOTO_DIR, ISSUED_PHOTOS_DIR, REPORT_DIR]:
     d.mkdir(parents=True, exist_ok=True)
 DATA_FILE = DATA_DIR / "stock_requests.csv"
 
+# === Email / SMTP config (uses Streamlit secrets) ===
+# Add these to Streamlit Cloud secrets: EXCHANGE_EMAIL and EXCHANGE_PASSWORD
+# Example in Streamlit secrets UI:
+# EXCHANGE_EMAIL = "reece@acucomm.co.za"
+# EXCHANGE_PASSWORD = "yourExchangePassword"
+SMTP_SERVER = "smtp.office365.com"
+SMTP_PORT = 587
+
+# Try to fetch credentials from st.secrets (preferred). Fall back to environment vars.
+def get_secret(key):
+    try:
+        return st.secrets[key]
+    except Exception:
+        return os.getenv(key)
+
+SENDER_EMAIL = get_secret("EXCHANGE_EMAIL")
+SENDER_PASSWORD = get_secret("EXCHANGE_PASSWORD")
+
+def send_email(subject, html_body, to_emails):
+    """
+    Send HTML email via Office365 SMTP.
+    to_emails can be a single email string or a list of emails.
+    Returns True on success, False on failure.
+    """
+    if not SENDER_EMAIL or not SENDER_PASSWORD:
+        print("Email credentials not configured (SENDER_EMAIL / SENDER_PASSWORD).")
+        return False
+
+    if isinstance(to_emails, str):
+        recipients = [to_emails]
+    else:
+        recipients = to_emails
+
+    try:
+        msg = MIMEMultipart()
+        msg["From"] = SENDER_EMAIL
+        msg["To"] = ", ".join(recipients)
+        msg["Subject"] = subject
+        msg.attach(MIMEText(html_body, "html"))
+
+        with smtplib.SMTP(SMTP_SERVER, SMTP_PORT) as server:
+            server.ehlo()
+            server.starttls()
+            server.login(SENDER_EMAIL, SENDER_PASSWORD)
+            server.sendmail(SENDER_EMAIL, recipients, msg.as_string())
+
+        print(f"Email sent: {subject} -> {recipients}")
+        return True
+    except Exception as e:
+        print(f"Failed to send email: {e}")
+        return False
+
 # === Display Logo ===
 logo_path = ROOT / "Acucomm logo.jpg"
 if logo_path.exists():
@@ -29,15 +85,15 @@ if logo_path.exists():
 st.markdown("<h1 style='text-align: center;'>Stock Management</h1>", unsafe_allow_html=True)
 st.markdown("---")
 
-# === User Database ===
+# === User Database (with emails per your mapping) ===
 def hash_password(p):
     return hashlib.sha256(p.encode()).hexdigest()
 
 raw_users = {
-    "Deezlo": {"name": "Deezlo", "password": "Deezlo123", "role": "contractor"},
-    "ethekwini": {"name": "ethekwini", "password": "ethekwini123", "role": "city"},
-    "installer1": {"name": "installer1", "password": "installer123", "role": "installer"},
-    "Reece": {"name": "Reece", "password": "Reece123!", "role": "manager"},
+    "Deezlo": {"name": "Deezlo", "password": "Deezlo123", "role": "contractor", "email": "thando@acucomm.co.za"},
+    "ethekwini": {"name": "ethekwini", "password": "ethekwini123", "role": "city", "email": "Amanda@acucomm.co.za"},
+    "installer1": {"name": "installer1", "password": "installer123", "role": "installer", "email": "alistair@acucomm.co.za"},
+    "Reece": {"name": "Reece", "password": "Reece123!", "role": "manager", "email": "reece@acucomm.co.za"},
 }
 
 CREDENTIALS = {
@@ -45,6 +101,7 @@ CREDENTIALS = {
         "name": v["name"],
         "password_hash": hash_password(v["password"]),
         "role": v["role"],
+        "email": v["email"].lower() if "email" in v else "",
     }
     for u, v in raw_users.items()
 }
@@ -104,6 +161,7 @@ def logout():
 def contractor_ui():
     st.header("👷 Contractor - Submit Stock Request")
     contractor_name = st.session_state.auth["name"]
+    contractor_email = CREDENTIALS[st.session_state.auth["username"]]["email"]
 
     installer_name = st.text_input("Installer Name")
 
@@ -166,6 +224,26 @@ def contractor_ui():
             save_data(df)
             st.success(f"✅ Request(s) submitted under base ID {rid}")
 
+            # Send HTML email to City (ethekwini)
+            city_email = [v["email"] for v in CREDENTIALS.values() if v["role"] == "city"]
+            subject = f"New Stock Request Submitted — {rid} by {contractor_name}"
+            body = f"""
+            <html>
+              <body>
+                <h3>New Stock Request Submitted</h3>
+                <p><strong>Contractor:</strong> {contractor_name}<br>
+                   <strong>Installer:</strong> {installer_name}<br>
+                   <strong>Request ID:</strong> {rid}</p>
+                <p><strong>Requested:</strong><br>
+                   DN15 Meter: {meter_qty}<br>
+                   CIU Keypad: {keypad_qty}</p>
+                <p>Please log in to the Stock Management app to verify and approve.</p>
+              </body>
+            </html>
+            """
+            if city_email:
+                send_email(subject, body, city_email)
+
     st.subheader("📋 My Requests")
     df = load_data()
     myreq = df[df["Contractor_Name"] == contractor_name]
@@ -186,6 +264,16 @@ def city_ui():
         notes = st.text_area("Notes")
         decline_reason = st.text_input("Decline reason")
 
+        # find contractor email using contractor name -> mapping in CREDENTIALS (by name match)
+        contractor_email = ""
+        for cred in CREDENTIALS.values():
+            if cred["name"].lower() == row["Contractor_Name"].lower():
+                contractor_email = cred.get("email", "")
+                break
+        # fallback: use mapping from raw_users entry if present
+        if not contractor_email:
+            contractor_email = CREDENTIALS.get("Deezlo", {}).get("email", "")
+
         if st.button("Approve"):
             df.loc[df["Request_ID"] == sel, "Approved_Qty"] = qty
             ppath = ""
@@ -200,6 +288,21 @@ def city_ui():
             df.loc[df["Request_ID"] == sel, "Date_Approved"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             save_data(df)
             st.success("✅ Approved and issued.")
+            # Notify contractor (HTML)
+            subject = f"Your Stock Request Approved — {sel}"
+            body = f"""
+            <html>
+              <body>
+                <h3>Stock Request Approved ✅</h3>
+                <p>Hello {row['Contractor_Name']},</p>
+                <p>Your stock request <strong>{sel}</strong> has been approved and issued.</p>
+                <p><strong>Approved Quantity:</strong> {qty}</p>
+                <p>Notes from City: {notes}</p>
+              </body>
+            </html>
+            """
+            if contractor_email:
+                send_email(subject, body, contractor_email)
             safe_rerun()
 
         if st.button("Decline"):
@@ -207,6 +310,19 @@ def city_ui():
             df.loc[df["Request_ID"] == sel, "Decline_Reason"] = decline_reason
             save_data(df)
             st.error("❌ Declined.")
+            subject = f"Your Stock Request Declined — {sel}"
+            body = f"""
+            <html>
+              <body>
+                <h3>Stock Request Declined</h3>
+                <p>Hello {row['Contractor_Name']},</p>
+                <p>Your stock request <strong>{sel}</strong> was declined.</p>
+                <p><strong>Reason:</strong> {decline_reason}</p>
+              </body>
+            </html>
+            """
+            if contractor_email:
+                send_email(subject, body, contractor_email)
             safe_rerun()
 
 # === Installer UI ===
@@ -224,6 +340,21 @@ def installer_ui():
         df.loc[df["Request_ID"] == sel, "Date_Received"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         save_data(df)
         st.success(f"Request {sel} marked as received.")
+
+        # Notify manager
+        manager_emails = [v["email"] for v in CREDENTIALS.values() if v["role"] == "manager"]
+        subject = f"Stock Received — {sel}"
+        body = f"""
+        <html>
+          <body>
+            <h3>Stock Received</h3>
+            <p>Installer <strong>{installer}</strong> has marked request <strong>{sel}</strong> as received.</p>
+            <p>Please review reconciliation in the manager dashboard.</p>
+          </body>
+        </html>
+        """
+        if manager_emails:
+            send_email(subject, body, manager_emails)
         safe_rerun()
 
 # === Manager UI ===
