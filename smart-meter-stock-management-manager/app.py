@@ -47,25 +47,21 @@ def send_email(subject, html_body, to_emails):
     if not SENDER_EMAIL or not SENDER_PASSWORD:
         print("Email credentials not configured.")
         return False
-
     if isinstance(to_emails, str):
         recipients = [to_emails]
     else:
         recipients = to_emails
-
     try:
         msg = MIMEMultipart()
         msg["From"] = SENDER_EMAIL
         msg["To"] = ", ".join(recipients)
         msg["Subject"] = subject
         msg.attach(MIMEText(html_body, "html"))
-
         with smtplib.SMTP(SMTP_SERVER, SMTP_PORT) as server:
             server.ehlo()
             server.starttls()
             server.login(SENDER_EMAIL, SENDER_PASSWORD)
             server.sendmail(SENDER_EMAIL, recipients, msg.as_string())
-
         print(f"Email sent: {subject} -> {recipients}")
         return True
     except Exception as e:
@@ -79,7 +75,7 @@ if logo_path.exists():
 st.markdown("<h1 style='text-align: center;'>Stock Management</h1>", unsafe_allow_html=True)
 st.markdown("---")
 
-# === User Database (with emails per role) ===
+# === User Database ===
 def hash_password(p):
     return hashlib.sha256(p.encode()).hexdigest()
 
@@ -95,7 +91,7 @@ CREDENTIALS = {
         "name": v["name"],
         "password_hash": hash_password(v["password"]),
         "role": v["role"],
-        "email": v["email"].lower() if "email" in v else "",
+        "email": v["email"],
     }
     for u, v in raw_users.items()
 }
@@ -156,12 +152,10 @@ def contractor_ui():
     st.header("👷 Contractor - Submit Stock Request")
     contractor_name = st.session_state.auth["name"]
     installer_name = st.text_input("Installer Name")
-
     st.subheader("Select Stock Items & Quantities")
     col1, col2 = st.columns(2)
     meter_qty = col1.number_input("DN15 Meter Quantity", min_value=0, value=0, step=1)
     keypad_qty = col2.number_input("CIU Keypad Quantity", min_value=0, value=0, step=1)
-
     notes = st.text_area("Notes")
 
     if st.button("Submit Request"):
@@ -172,7 +166,6 @@ def contractor_ui():
         else:
             df = load_data()
             rid = generate_request_id()
-
             for item_type, qty in [("DN15 Meter", meter_qty), ("CIU Keypad", keypad_qty)]:
                 if qty > 0:
                     df = pd.concat([df, pd.DataFrame([{
@@ -191,7 +184,6 @@ def contractor_ui():
                         "Date_Approved": "",
                         "Date_Received": "",
                     }])], ignore_index=True)
-
             save_data(df)
             st.success(f"✅ Request(s) submitted under base ID {rid}")
 
@@ -229,8 +221,6 @@ def city_ui():
         photo = st.file_uploader("Upload proof photo", type=["jpg", "png"])
         notes = st.text_area("Notes")
         decline_reason = st.text_input("Decline reason")
-
-        # Contractor email
         contractor_email = CREDENTIALS.get("Deezlo")["email"]
 
         if st.button("Approve"):
@@ -248,7 +238,7 @@ def city_ui():
             save_data(df)
             st.success("✅ Approved and issued.")
 
-            # Email contractor & installer
+            # Email Contractor + Installer
             subject = f"Stock Request Approved — {sel}"
             body = f"""
             <html><body>
@@ -267,7 +257,7 @@ def city_ui():
             save_data(df)
             st.error("❌ Declined.")
 
-            # Email contractor
+            # Email Contractor
             subject = f"Stock Request Declined — {sel}"
             body = f"""
             <html><body>
@@ -332,7 +322,7 @@ def manager_ui():
         styles = getSampleStyleSheet()
         elems = []
 
-        # Add logo to PDF
+        # Add logo
         if logo_path.exists():
             elems.append(Image(str(logo_path), width=120, height=60))
         elems.append(Paragraph("<b>Smart Meter Stock Report</b>", styles['Title']))
