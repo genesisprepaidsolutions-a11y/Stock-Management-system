@@ -141,7 +141,7 @@ def send_email(subject, html_body, to_emails):
 # ====================================================
 logo_path = ROOT / "DBN_Metro.png"
 if logo_path.exists():
-    st.image(str(logo_path), use_container_width=False, width=200)
+    st.image(str(logo_path), use_container_width=False, width=150)
 else:
     st.warning("⚠️ Logo not found: DBN_Metro.png")
 
