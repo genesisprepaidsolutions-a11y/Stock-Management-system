@@ -342,7 +342,7 @@ def installer_ui():
     acucomm_logo = ROOT / "acucomm logo.jpg"
     if acucomm_logo.exists():
         st.markdown("<div style='display:flex;justify-content:center;'>", unsafe_allow_html=True)
-        st.image(str(acucomm_logo), width=350)
+        st.image(str(acucomm_logo), width=100)
         st.markdown("</div>", unsafe_allow_html=True)
 
     st.markdown("---")
