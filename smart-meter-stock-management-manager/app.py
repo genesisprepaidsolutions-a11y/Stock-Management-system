@@ -14,7 +14,8 @@ import smtplib
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 
-st.set_page_config(page_title="Acucomm Stock Management", page_icon="📦", layout="wide")
+# === PAGE CONFIG ===
+st.set_page_config(page_title="Stock Management", page_icon="📦", layout="wide")
 
 # === Directories ===
 ROOT = Path(__file__).parent
@@ -69,9 +70,12 @@ def send_email(subject, html_body, to_emails):
         return False
 
 # === Display Logo ===
-logo_path = ROOT / "Acucomm logo.jpg"
+logo_path = ROOT / "DBN_metro.PNG"
 if logo_path.exists():
     st.image(str(logo_path), use_container_width=False, width=200)
+else:
+    st.warning("Logo not found: DBN_metro.PNG")
+
 st.markdown("<h1 style='text-align: center;'>Stock Management</h1>", unsafe_allow_html=True)
 st.markdown("---")
 
