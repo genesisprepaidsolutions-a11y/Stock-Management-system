@@ -149,7 +149,7 @@ if logo_path.exists():
     st.markdown(
         f"""
         <div style='text-align:center;'>
-            <img src='data:image/png;base64,{encoded_logo}' width='50'/>
+            <img src='data:image/png;base64,{encoded_logo}' width='70'/>
         </div>
         """,
         unsafe_allow_html=True,
