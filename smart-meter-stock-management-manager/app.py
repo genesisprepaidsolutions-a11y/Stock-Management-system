@@ -236,7 +236,6 @@ def contractor_ui():
     st.header("Contractor - Submit Stock Request")
 
     # === Centered logos: DBN Metro + Contractor ===
-    dbn_logo = ROOT / "DBN_Metro.png"
     contractor_logo = ROOT / "contractor logo.jpg"
     col1, col2, col3 = st.columns([1, 2, 1])
     with col2:
