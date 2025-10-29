@@ -37,19 +37,14 @@ st.set_page_config(
 # ====================================================
 st.markdown(f"""
     <style>
-        /* Main background */
         .stApp {{
             background-color: {WHITE};
             color: {PRIMARY_BLUE};
             font-family: 'Helvetica Neue', sans-serif;
         }}
-
-        /* Header */
         h1, h2, h3, h4 {{
             color: {PRIMARY_BLUE};
         }}
-
-        /* Buttons */
         .stButton>button {{
             background-color: {SECONDARY_BLUE};
             color: {WHITE};
@@ -63,8 +58,6 @@ st.markdown(f"""
             background-color: {PRIMARY_BLUE};
             color: {WHITE};
         }}
-
-        /* Sidebar */
         [data-testid="stSidebar"] {{
             background: linear-gradient(180deg, {PRIMARY_BLUE}, {SECONDARY_BLUE});
             color: {WHITE};
@@ -75,8 +68,6 @@ st.markdown(f"""
         [data-testid="stSidebar"] a {{
             color: {WHITE} !important;
         }}
-
-        /* Tables */
         .stDataFrame tbody td {{
             color: {PRIMARY_BLUE};
         }}
@@ -84,8 +75,6 @@ st.markdown(f"""
             background-color: {SECONDARY_BLUE};
             color: {WHITE};
         }}
-
-        /* Footer */
         .footer {{
             position: fixed;
             bottom: 0;
@@ -107,7 +96,8 @@ DATA_DIR = ROOT / "data"
 PHOTO_DIR = ROOT / "photos"
 ISSUED_PHOTOS_DIR = PHOTO_DIR / "issued"
 REPORT_DIR = ROOT / "reports"
-for d in [DATA_DIR, PHOTO_DIR, ISSUED_PHOTOS_DIR, REPORT_DIR]:
+DUMP_DIR = DATA_DIR / "dumps"
+for d in [DATA_DIR, PHOTO_DIR, ISSUED_PHOTOS_DIR, REPORT_DIR, DUMP_DIR]:
     d.mkdir(parents=True, exist_ok=True)
 
 DATA_FILE = DATA_DIR / "stock_requests.csv"
@@ -196,7 +186,7 @@ def safe_rerun():
         pass
 
 # ====================================================
-# === DATA HELPERS ===
+# === DATA HELPERS (With DUMP FEATURE) ===
 # ====================================================
 def load_data():
     if DATA_FILE.exists():
@@ -214,6 +204,10 @@ def load_data():
 
 def save_data(df):
     df.to_csv(DATA_FILE, index=False)
+    # --- Create a dump file backup every save ---
+    dump_filename = f"stock_requests_{datetime.now().strftime('%Y-%m-%d')}.csv"
+    dump_path = DUMP_DIR / dump_filename
+    df.to_csv(dump_path, index=False)
 
 def generate_request_id():
     return f"REQ-{datetime.now().strftime('%Y%m%d%H%M%S')}"
@@ -340,6 +334,17 @@ def manager_ui():
     st.header("Project Manager - Reconciliation & Export")
     df = load_data()
     st.dataframe(df, use_container_width=True)
+
+    st.markdown("### 📦 Data Dump & Backup")
+    dumps = sorted(DUMP_DIR.glob("*.csv"), reverse=True)
+    if dumps:
+        dump_names = [d.name for d in dumps]
+        selected_dump = st.selectbox("Select Dump File", dump_names)
+        dump_df = pd.read_csv(DUMP_DIR / selected_dump)
+        st.dataframe(dump_df, use_container_width=True)
+        st.download_button("Download Selected Dump", dump_df.to_csv(index=False).encode(), selected_dump, "text/csv")
+    else:
+        st.info("No dump files available yet.")
 
 # ====================================================
 # === ROUTING ===
