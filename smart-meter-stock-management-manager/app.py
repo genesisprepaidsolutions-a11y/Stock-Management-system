@@ -352,7 +352,7 @@ if logo_path.exists():
 else:
     st.warning("⚠️ Logo not found: DBN_Metro.png")
 
-st.markdown(f"<h1 style='text-align:center;color:{PRIMARY_BLUE};'>Ethekwini Smart Meter Stock Management</h1>", unsafe_allow_html=True)
+st.markdown(f"<h1 style='text-align:center;color:{PRIMARY_BLUE};'>Ethekwini Smart Meter Stock Management-WS7761</h1>", unsafe_allow_html=True)
 st.markdown("---")
 
 # ====================================================
@@ -657,6 +657,6 @@ st.markdown(f"""
         }}
     </style>
     <div class="footer">
-        © {datetime.now().year} eThekwini Municipality | Smart Meter Stock Management System
+        © {datetime.now().year} eThekwini Municipality-WS7761 | Smart Meter Stock Management System
     </div>
 """, unsafe_allow_html=True)
