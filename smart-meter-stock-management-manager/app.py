@@ -1,3 +1,4 @@
+
 # app.py
 import streamlit as st
 import pandas as pd
@@ -7,15 +8,49 @@ import hashlib
 from io import BytesIO
 from reportlab.lib.pagesizes import A4, landscape
 from reportlab.lib import colors
-from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, Image
+from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, Image as RLImage
 from reportlab.lib.styles import getSampleStyleSheet
 import os
 import smtplib
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 
-# === PAGE CONFIG ===
+# === THEME / STYLING ===
+PRIMARY_BLUE = "#003366"     # dark blue – municipal corporate colour
+SECONDARY_BLUE = "#0072BC"   # lighter blue accent
+ACCENT_WHITE = "#FFFFFF"
+BUTTON_BG = SECONDARY_BLUE
+BUTTON_TEXT = ACCENT_WHITE
+
 st.set_page_config(page_title="Stock Management", page_icon="📦", layout="wide")
+
+# Add custom CSS for colours and styling
+st.markdown(f"""
+    <style>
+    .reportview-container .main header .block-container{{padding-top:1rem;}}
+    h1, h2, h3, .stButton>button {{
+        color: {ACCENT_WHITE};
+    }}
+    .stButton>button {{
+        background-color: {BUTTON_BG};
+        border: none;
+        color: {BUTTON_TEXT};
+        padding: 0.6rem 1rem;
+        font-size: 1rem;
+        border-radius: 4px;
+    }}
+    .stSidebar .sidebar-content {{
+        background-color: {PRIMARY_BLUE};
+        color: {ACCENT_WHITE};
+    }}
+    .css-1d391kg, .css-1d391kg button {{
+        background-color: {BUTTON_BG};
+    }}
+    a, .st-breadcrumbs, .stMarkdown {{
+        color: {SECONDARY_BLUE};
+    }}
+    </style>
+""", unsafe_allow_html=True)
 
 # === Directories ===
 ROOT = Path(__file__).parent
@@ -69,14 +104,14 @@ def send_email(subject, html_body, to_emails):
         print(f"Failed to send email: {e}")
         return False
 
-# === Display Ethekwini Municipality Logo ===
-logo_path = ROOT / "DBN_Metro.png"   # ← use your uploaded image
+# === Display Logo & Header ===
+logo_path = ROOT / "DBN_Metro.png"
 if logo_path.exists():
     st.image(str(logo_path), use_container_width=False, width=180)
 else:
     st.warning("Logo not found: DBN_Metro.png")
 
-st.markdown("<h1 style='text-align: center; color:#0072BC;'>Ethekwini Smart Meter Stock Management</h1>", unsafe_allow_html=True)
+st.markdown(f"<h1 style='text-align: center; color:{PRIMARY_BLUE};'>eThekwini Smart Meter Stock Management</h1>", unsafe_allow_html=True)
 st.markdown("---")
 
 # === User Database ===
@@ -191,7 +226,6 @@ def contractor_ui():
             save_data(df)
             st.success(f"✅ Request(s) submitted under base ID {rid}")
 
-            # Email City
             subject = f"New Stock Request Submitted — {rid}"
             body = f"""
             <html><body>
@@ -242,7 +276,6 @@ def city_ui():
             save_data(df)
             st.success("✅ Approved and issued.")
 
-            # Email Contractor + Installer
             subject = f"Stock Request Approved — {sel}"
             body = f"""
             <html><body>
@@ -261,7 +294,6 @@ def city_ui():
             save_data(df)
             st.error("❌ Declined.")
 
-            # Email Contractor
             subject = f"Stock Request Declined — {sel}"
             body = f"""
             <html><body>
@@ -289,7 +321,6 @@ def installer_ui():
         save_data(df)
         st.success(f"Request {sel} marked as received.")
 
-        # Email manager
         subject = f"Stock Request Received — {sel}"
         body = f"""
         <html><body>
@@ -325,7 +356,7 @@ def manager_ui():
         elems = []
 
         if logo_path.exists():
-            elems.append(Image(str(logo_path), width=120, height=60))
+            elems.append(RLImage(str(logo_path), width=120, height=60))
         elems.append(Paragraph("<b>Smart Meter Stock Report</b>", styles['Title']))
         elems.append(Paragraph(datetime.now().strftime("%Y-%m-%d %H:%M:%S"), styles['Normal']))
         elems.append(Spacer(1, 12))
@@ -340,8 +371,8 @@ def manager_ui():
         ]
         table = Table(data_summary)
         table.setStyle(TableStyle([
-            ("BACKGROUND", (0, 0), (-1, 0), colors.grey),
-            ("TEXTCOLOR", (0, 0), (-1, 0), colors.whitesmoke),
+            ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor(PRIMARY_BLUE)),
+            ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
             ("ALIGN", (0, 0), (-1, -1), "CENTER"),
             ("GRID", (0, 0), (-1, -1), 1, colors.black),
         ]))
