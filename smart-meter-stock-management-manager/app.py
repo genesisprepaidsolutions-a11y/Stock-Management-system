@@ -240,7 +240,7 @@ def logout():
 def contractor_ui():
     logo_path = ROOT / "contractor logo.jpg"
     if logo_path.exists():
-        st.image(str(logo_path), width=300)
+        st.image(str(logo_path), width=500)
     st.header("Contractor - Submit Stock Request")
 
     contractor_name = st.session_state.auth["name"]
