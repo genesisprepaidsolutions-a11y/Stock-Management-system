@@ -27,7 +27,7 @@ GREY = "#F5F7FA"
 # === PAGE CONFIG ===
 # ====================================================
 st.set_page_config(
-    page_title="Ethekwini Smart Meter Stock Management",
+    page_title="Acucomm stock Management",
     page_icon="DBN_Metro.png",  # favicon
     layout="wide"
 )
