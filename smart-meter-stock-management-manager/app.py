@@ -10,7 +10,7 @@ from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 
 # ====================================================
-# === THEME & BRAND COLOURS (Ethekwini Municipality) ===
+# === THEME & BRAND COLOURS ===
 # ====================================================
 PRIMARY_BLUE = "#003366"
 SECONDARY_BLUE = "#0072BC"
@@ -235,17 +235,12 @@ def logout():
 def contractor_ui():
     st.header("Contractor - Submit Stock Request")
 
-    # === Centered logos: DBN Metro + Contractor ===
+    # === Centered Contractor logo only ===
     contractor_logo = ROOT / "contractor logo.jpg"
-    col1, col2, col3 = st.columns([1, 2, 1])
-    with col2:
-        inner_col1, inner_col2 = st.columns(2)
-        with inner_col1:
-            if dbn_logo.exists():
-                st.image(str(dbn_logo), width=180)
-        with inner_col2:
-            if contractor_logo.exists():
-                st.image(str(contractor_logo), width=180)
+    if contractor_logo.exists():
+        st.markdown("<div style='display:flex;justify-content:center;'>", unsafe_allow_html=True)
+        st.image(str(contractor_logo), width=200)
+        st.markdown("</div>", unsafe_allow_html=True)
 
     st.markdown("---")
 
@@ -326,18 +321,12 @@ def city_ui():
 def installer_ui():
     st.header("Meter Installer - Mark Received Stock")
 
-    # === Centered logos: DBN Metro + Acucomm ===
-    dbn_logo = ROOT / "DBN_Metro.png"
+    # === Centered Acucomm logo only ===
     acucomm_logo = ROOT / "acucomm logo.jpg"
-    col1, col2, col3 = st.columns([1, 2, 1])
-    with col2:
-        inner_col1, inner_col2 = st.columns(2)
-        with inner_col1:
-            if dbn_logo.exists():
-                st.image(str(dbn_logo), width=180)
-        with inner_col2:
-            if acucomm_logo.exists():
-                st.image(str(acucomm_logo), width=180)
+    if acucomm_logo.exists():
+        st.markdown("<div style='display:flex;justify-content:center;'>", unsafe_allow_html=True)
+        st.image(str(acucomm_logo), width=200)
+        st.markdown("</div>", unsafe_allow_html=True)
 
     st.markdown("---")
 
