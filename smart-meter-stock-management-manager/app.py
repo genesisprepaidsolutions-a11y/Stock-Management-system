@@ -28,7 +28,7 @@ GREY = "#F5F7FA"
 # ====================================================
 st.set_page_config(
     page_title="Acucomm stock Management",
-    page_icon="DBN_Metro.png",  # favicon
+    page_icon="Acucomm logo.jpg",  # favicon
     layout="wide"
 )
 
