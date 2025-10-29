@@ -9,6 +9,9 @@ import smtplib
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 import base64
+import shutil
+import requests  # used for Microsoft Graph upload
+import json
 
 # ====================================================
 # === THEME & BRAND COLOURS ===
@@ -35,7 +38,6 @@ st.set_page_config(
     page_icon=favicon_image,
     layout="centered"
 )
-
 
 # ====================================================
 # === CUSTOM CSS FOR THEME ===
@@ -94,7 +96,7 @@ st.markdown(f"""
 """, unsafe_allow_html=True)
 
 # ====================================================
-# === DIRECTORY SETUP ===
+# === DIRECTORY SETUP (PERSISTENT STORAGE) ===
 # ====================================================
 ROOT = Path(__file__).parent
 DATA_DIR = ROOT / "data"
@@ -102,22 +104,138 @@ PHOTO_DIR = ROOT / "photos"
 ISSUED_PHOTOS_DIR = PHOTO_DIR / "issued"
 REPORT_DIR = ROOT / "reports"
 DUMP_DIR = DATA_DIR / "dumps"
+BACKUP_ZIP_PREFIX = ROOT / "data_backup"  # will create data_backup.zip
+BACKUP_FILE = Path(str(BACKUP_ZIP_PREFIX) + ".zip")
+
 for d in [DATA_DIR, PHOTO_DIR, ISSUED_PHOTOS_DIR, REPORT_DIR, DUMP_DIR]:
     d.mkdir(parents=True, exist_ok=True)
 
 DATA_FILE = DATA_DIR / "stock_requests.csv"
 
 # ====================================================
-# === EMAIL CONFIG ===
+# === ONE DRIVE CONFIG (OFF-DEVICE PERSISTENCE) ===
 # ====================================================
-SMTP_SERVER = "smtp.office365.com"
-SMTP_PORT = 587
-
+# Two supported modes (in order):
+# 1) Local OneDrive folder: set ONE_DRIVE_PATH env var to a folder that syncs to OneDrive.
+#    e.g. ONE_DRIVE_PATH="C:\\Users\\Reece\\OneDrive - Company\\Backups"
+# 2) Microsoft Graph upload: provide ONEDRIVE_ACCESS_TOKEN in st.secrets or env var.
+#    The token must have Files.ReadWrite permission.
+ONE_DRIVE_PATH = os.getenv("ONE_DRIVE_PATH")  # local path to user's OneDrive sync folder (optional)
 def get_secret(key):
     try:
         return st.secrets[key]
     except Exception:
         return os.getenv(key)
+
+ONEDRIVE_ACCESS_TOKEN = get_secret("ONEDRIVE_ACCESS_TOKEN")  # optional: direct Graph API access token
+
+# --- PERSISTENCE: AUTOMATIC BACKUP & RESTORE ---
+def make_archive():
+    """
+    Create a ZIP archive of the DATA_DIR (including dumps, photos etc).
+    Returns path to zip file.
+    """
+    try:
+        archive_base = str(BACKUP_ZIP_PREFIX)
+        # shutil.make_archive will append .zip so we remove if exists before creating to avoid old contents
+        if BACKUP_FILE.exists():
+            try:
+                BACKUP_FILE.unlink()
+            except Exception:
+                pass
+        archive_path = shutil.make_archive(archive_base, 'zip', root_dir=str(DATA_DIR))
+        return Path(archive_path)
+    except Exception as e:
+        st.error(f"Failed to create local archive: {e}")
+        return None
+
+def copy_to_local_onedrive(zip_path: Path):
+    """
+    If ONE_DRIVE_PATH is configured and valid, copy the zip there.
+    Returns True on success.
+    """
+    if not ONE_DRIVE_PATH:
+        return False
+    try:
+        dest_folder = Path(ONE_DRIVE_PATH)
+        if not dest_folder.exists():
+            # don't crash — just return False
+            st.warning(f"ONE_DRIVE_PATH set but folder does not exist: {dest_folder}")
+            return False
+        dest_folder.mkdir(parents=True, exist_ok=True)
+        dest = dest_folder / f"{zip_path.name}"
+        shutil.copy2(str(zip_path), str(dest))
+        st.info(f"Backup copied to OneDrive folder: {dest}")
+        return True
+    except Exception as e:
+        st.warning(f"Failed to copy to ONE_DRIVE_PATH: {e}")
+        return False
+
+def upload_to_onedrive_graph(zip_path: Path):
+    """
+    Upload file to OneDrive via Microsoft Graph using ONEDRIVE_ACCESS_TOKEN.
+    Places file under Apps/AcucommBackups/<filename>
+    Returns True on success.
+    """
+    token = ONEDRIVE_ACCESS_TOKEN
+    if not token:
+        return False
+    try:
+        filename = zip_path.name
+        # target path on OneDrive
+        remote_path = f"/Apps/AcucommBackups/{filename}"
+        upload_url = f"https://graph.microsoft.com/v1.0/me/drive/root:{remote_path}:/content"
+        headers = {
+            "Authorization": f"Bearer {token}",
+            "Content-Type": "application/zip"
+        }
+        with open(zip_path, "rb") as f:
+            resp = requests.put(upload_url, headers=headers, data=f)
+        if resp.status_code in (200, 201):
+            st.info("Backup uploaded to OneDrive via Microsoft Graph.")
+            return True
+        else:
+            st.warning(f"Graph upload failed ({resp.status_code}): {resp.text}")
+            return False
+    except Exception as e:
+        st.warning(f"Exception uploading to Graph: {e}")
+        return False
+
+def backup_data():
+    """
+    Creates archive + attempts copies/uploads to OneDrive (local path and Graph).
+    """
+    zip_path = make_archive()
+    if not zip_path:
+        return False
+    ok_local = copy_to_local_onedrive(zip_path)
+    ok_graph = upload_to_onedrive_graph(zip_path)
+    # Keep a copy locally too (already created)
+    return ok_local or ok_graph
+
+def restore_data():
+    """
+    On startup, if BACKUP_FILE exists, attempt to unpack it into DATA_DIR.
+    This ensures the app recovers after redeploys if backups exist in repo or local.
+    """
+    if BACKUP_FILE.exists():
+        try:
+            shutil.unpack_archive(str(BACKUP_FILE), extract_dir=str(DATA_DIR))
+            st.info("✅ Data restored from local backup zip.")
+        except Exception as e:
+            st.warning(f"Restore error: {e}")
+
+# Attempt an initial restore (if any zip exists in project)
+try:
+    restore_data()
+except Exception:
+    pass
+
+# ====================================================
+# === EMAIL CONFIG ===
+# ====================================================
+SMTP_SERVER = "smtp.office365.com"
+SMTP_PORT = 587
 
 SENDER_EMAIL = get_secret("EXCHANGE_EMAIL")
 SENDER_PASSWORD = get_secret("EXCHANGE_PASSWORD")
@@ -147,34 +265,26 @@ def send_email(subject, html_body, to_emails):
         return False
 
 # ====================================================
-# === LOGO & HEADER (Centered) ===
+# === LOGO & HEADER ===
 # ====================================================
 logo_path = ROOT / "DBN_Metro.png"
 if logo_path.exists():
     with open(logo_path, "rb") as img_file:
         encoded_logo = base64.b64encode(img_file.read()).decode()
     st.markdown(
-        f"""
-        <div style='text-align:center;'>
-            <img src='data:image/png;base64,{encoded_logo}' width='70'/>
-        </div>
-        """,
+        f"<div style='text-align:center;'><img src='data:image/png;base64,{encoded_logo}' width='70'/></div>",
         unsafe_allow_html=True,
     )
 else:
     st.warning("⚠️ Logo not found: DBN_Metro.png")
 
-st.markdown(
-    f"<h1 style='text-align:center;color:{PRIMARY_BLUE};'>Ethekwini Smart Meter Stock Management</h1>",
-    unsafe_allow_html=True,
-)
+st.markdown(f"<h1 style='text-align:center;color:{PRIMARY_BLUE};'>Ethekwini Smart Meter Stock Management</h1>", unsafe_allow_html=True)
 st.markdown("---")
 
 # ====================================================
-# === USER AUTH ===
+# === AUTHENTICATION ===
 # ====================================================
-def hash_password(p):
-    return hashlib.sha256(p.encode()).hexdigest()
+def hash_password(p): return hashlib.sha256(p.encode()).hexdigest()
 
 raw_users = {
     "Deezlo": {"name": "Deezlo", "password": "Deezlo123", "role": "contractor", "email": CONTRACTOR_EMAIL},
@@ -183,15 +293,7 @@ raw_users = {
     "Reece": {"name": "Reece", "password": "Reece123!", "role": "manager", "email": MANAGER_EMAIL},
 }
 
-CREDENTIALS = {
-    u: {
-        "name": v["name"],
-        "password_hash": hash_password(v["password"]),
-        "role": v["role"],
-        "email": v["email"],
-    }
-    for u, v in raw_users.items()
-}
+CREDENTIALS = {u: {"name": v["name"], "password_hash": hash_password(v["password"]), "role": v["role"], "email": v["email"]} for u, v in raw_users.items()}
 
 if "auth" not in st.session_state:
     st.session_state.auth = {"logged_in": False, "username": None, "role": None, "name": None}
@@ -203,27 +305,43 @@ def safe_rerun():
         pass
 
 # ====================================================
-# === DATA HELPERS ===
+# === DATA HANDLING (with redundancy) ===
 # ====================================================
 def load_data():
     if DATA_FILE.exists():
         try:
-            return pd.read_csv(DATA_FILE)
+            df = pd.read_csv(DATA_FILE)
+            if not df.empty:
+                return df
         except Exception:
             pass
-    cols = [
-        "Date_Requested", "Request_ID", "Contractor_Name", "Installer_Name",
-        "Meter_Type", "Requested_Qty", "Approved_Qty", "Photo_Path",
-        "Status", "Contractor_Notes", "City_Notes", "Decline_Reason",
-        "Date_Approved", "Date_Received"
-    ]
+    cols = ["Date_Requested", "Request_ID", "Contractor_Name", "Installer_Name",
+            "Meter_Type", "Requested_Qty", "Approved_Qty", "Photo_Path",
+            "Status", "Contractor_Notes", "City_Notes", "Decline_Reason",
+            "Date_Approved", "Date_Received"]
     return pd.DataFrame(columns=cols)
 
 def save_data(df):
-    df.to_csv(DATA_FILE, index=False)
-    dump_filename = f"stock_requests_{datetime.now().strftime('%Y-%m-%d')}.csv"
-    dump_path = DUMP_DIR / dump_filename
-    df.to_csv(dump_path, index=False)
+    # Save main CSV
+    try:
+        df.to_csv(DATA_FILE, index=False)
+    except Exception as e:
+        st.warning(f"Could not save main data file: {e}")
+    # Create dated dump for redundancy
+    try:
+        dump_filename = f"stock_requests_{datetime.now().strftime('%Y-%m-%d_%H%M%S')}.csv"
+        df.to_csv(DUMP_DIR / dump_filename, index=False)
+    except Exception as e:
+        st.warning(f"Could not create dump: {e}")
+    # Create zip archive of data folder and push to OneDrive (local or Graph)
+    try:
+        ok = backup_data()
+        if ok:
+            st.success("Backup succeeded (local OneDrive or Graph).")
+        else:
+            st.info("Backup created locally; OneDrive upload not completed (configure ONE_DRIVE_PATH or ONEDRIVE_ACCESS_TOKEN to enable).")
+    except Exception as e:
+        st.warning(f"Automatic backup failed: {e}")
 
 def generate_request_id():
     return f"REQ-{datetime.now().strftime('%Y%m%d%H%M%S')}"
@@ -252,7 +370,7 @@ def logout():
     safe_rerun()
 
 # ====================================================
-# === ROLE INTERFACES ===
+# === ROLE UI PANELS ===
 # ====================================================
 def contractor_ui():
     st.header("Contractor - Submit Stock Request")
@@ -380,6 +498,17 @@ def manager_ui():
     else:
         st.info("No dump files available yet.")
 
+    st.markdown("### 🔁 Manual Backup")
+    if st.button("Create & Upload Backup Now"):
+        zipfile = make_archive()
+        if zipfile:
+            one_local = copy_to_local_onedrive(zipfile)
+            one_graph = upload_to_onedrive_graph(zipfile)
+            if one_local or one_graph:
+                st.success("Backup created and sent to configured OneDrive destination.")
+            else:
+                st.warning("Backup created locally but OneDrive upload not configured or failed.")
+
 # ====================================================
 # === ROUTING ===
 # ====================================================
@@ -388,10 +517,8 @@ if not st.session_state.auth["logged_in"]:
 else:
     st.sidebar.markdown(f"### {st.session_state.auth['name']}")
     st.sidebar.markdown(f"**Role:** {st.session_state.auth['role'].title()}")
-
     if st.sidebar.button("Logout"):
         logout()
-
     role = st.session_state.auth["role"]
     if role == "contractor":
         contractor_ui()
@@ -405,7 +532,7 @@ else:
         st.error("Unknown role.")
 
 # ====================================================
-# === FOOTER (Full Width) ===
+# === FOOTER ===
 # ====================================================
 st.markdown(f"""
     <style>
@@ -414,8 +541,8 @@ st.markdown(f"""
             left: 0;
             bottom: 0;
             width: 100%;
-            background-color: #003366; /* Dark blue */
-            color: white; /* White text */
+            background-color: #003366;
+            color: white;
             text-align: center;
             padding: 10px 0;
             font-size: 14px;
@@ -427,3 +554,4 @@ st.markdown(f"""
         © {datetime.now().year} eThekwini Municipality | Smart Meter Stock Management System
     </div>
 """, unsafe_allow_html=True)
+
