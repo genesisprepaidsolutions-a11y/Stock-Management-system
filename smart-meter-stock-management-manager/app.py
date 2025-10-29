@@ -242,7 +242,7 @@ def logout():
     safe_rerun()
 
 # ====================================================
-# === ROLE INTERFACES (KEEPING ORIGINAL LOGIC) ===
+# === ROLE INTERFACES ===
 # ====================================================
 def contractor_ui():
     st.header("Contractor - Submit Stock Request")
@@ -347,7 +347,6 @@ def manager_ui():
 if not st.session_state.auth["logged_in"]:
     login_ui()
 else:
-    st.sidebar.image(str(logo_path), width=150)
     st.sidebar.markdown(f"### {st.session_state.auth['name']}")
     st.sidebar.markdown(f"**Role:** {st.session_state.auth['role'].title()}")
     if st.sidebar.button("Logout"):
@@ -373,4 +372,3 @@ st.markdown(f"""
         © {datetime.now().year} eThekwini Municipality | Smart Meter Stock Management System
     </div>
 """, unsafe_allow_html=True)
-
