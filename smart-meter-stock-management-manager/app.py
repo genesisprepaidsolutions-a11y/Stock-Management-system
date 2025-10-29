@@ -137,16 +137,33 @@ def send_email(subject, html_body, to_emails):
         return False
 
 # ====================================================
-# === LOGO & HEADER ===
+# === LOGO & HEADER (Centered) ===
 # ====================================================
+import base64
+
 logo_path = ROOT / "DBN_Metro.png"
 if logo_path.exists():
-    st.image(str(logo_path), use_container_width=False, width=150)
+    # Centered logo using HTML base64 embedding
+    with open(logo_path, "rb") as img_file:
+        encoded_logo = base64.b64encode(img_file.read()).decode()
+    st.markdown(
+        f"""
+        <div style='text-align:center;'>
+            <img src='data:image/png;base64,{encoded_logo}' width='150'/>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
 else:
     st.warning("⚠️ Logo not found: DBN_Metro.png")
 
-st.markdown(f"<h1 style='text-align:center;color:{PRIMARY_BLUE};'>Ethekwini Smart Meter Stock Management</h1>", unsafe_allow_html=True)
+# Centered page header
+st.markdown(
+    f"<h1 style='text-align:center;color:{PRIMARY_BLUE};'>Ethekwini Smart Meter Stock Management</h1>",
+    unsafe_allow_html=True,
+)
 st.markdown("---")
+
 
 # ====================================================
 # === USER AUTH ===
