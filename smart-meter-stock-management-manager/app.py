@@ -402,10 +402,26 @@ else:
         st.error("Unknown role.")
 
 # ====================================================
-# === FOOTER ===
+# === FOOTER (Full Width) ===
 # ====================================================
 st.markdown(f"""
+    <style>
+        .footer {{
+            position: fixed;
+            left: 0;
+            bottom: 0;
+            width: 100%;
+            background-color: #f0f2f6;
+            color: #333;
+            text-align: center;
+            padding: 10px 0;
+            font-size: 14px;
+            border-top: 1px solid #ddd;
+            z-index: 100;
+        }}
+    </style>
     <div class="footer">
         © {datetime.now().year} eThekwini Municipality | Smart Meter Stock Management System
     </div>
 """, unsafe_allow_html=True)
+
