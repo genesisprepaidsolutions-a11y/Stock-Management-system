@@ -245,7 +245,7 @@ def logout():
 # === ROLE INTERFACES (KEEPING ORIGINAL LOGIC) ===
 # ====================================================
 def contractor_ui():
-    st.header("👷 Contractor - Submit Stock Request")
+    st.header("Contractor - Submit Stock Request")
     contractor_name = st.session_state.auth["name"]
     installer_name = st.text_input("Installer Name")
     st.subheader("Select Stock Items & Quantities")
@@ -284,7 +284,7 @@ def contractor_ui():
             st.success(f"✅ Request(s) submitted under base ID {rid}")
 
 def city_ui():
-    st.header("🏙️ City - Verify Requests")
+    st.header("eThekwini Muncipality - Verify Requests")
     df = load_data()
     pending = df[df["Status"] == "Pending Verification"]
     st.dataframe(pending, use_container_width=True)
@@ -321,7 +321,7 @@ def city_ui():
             safe_rerun()
 
 def installer_ui():
-    st.header("🔧 Installer - Mark Received Stock")
+    st.header("Meter Installer - Mark Received Stock")
     df = load_data()
     installer = st.session_state.auth["name"].strip().lower()
     approved = df[df["Installer_Name"].str.lower() == installer]
@@ -337,7 +337,7 @@ def installer_ui():
         safe_rerun()
 
 def manager_ui():
-    st.header("📊 Manager - Reconciliation & Export")
+    st.header("Project Manager - Reconciliation & Export")
     df = load_data()
     st.dataframe(df, use_container_width=True)
 
