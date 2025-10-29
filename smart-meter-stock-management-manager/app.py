@@ -23,7 +23,7 @@ GREY = "#F5F7FA"
 # ====================================================
 st.set_page_config(
     page_title="Acucomm Stock Management",
-    page_icon="Acucomm logo.jpg",
+    page_icon="acucomm logo.jpg",
     layout="centered"
 )
 
