@@ -4,11 +4,6 @@ import pandas as pd
 from datetime import datetime
 from pathlib import Path
 import hashlib
-from io import BytesIO
-from reportlab.lib.pagesizes import A4, landscape
-from reportlab.lib import colors
-from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, Image as RLImage
-from reportlab.lib.styles import getSampleStyleSheet
 import os
 import smtplib
 from email.mime.multipart import MIMEMultipart
@@ -27,7 +22,7 @@ GREY = "#F5F7FA"
 # === PAGE CONFIG ===
 # ====================================================
 st.set_page_config(
-    page_title="Acucomm stock Management",
+    page_title="Acucomm Stock Management",
     page_icon="Acucomm logo.jpg",
     layout="centered"
 )
@@ -238,10 +233,22 @@ def logout():
 # === ROLE INTERFACES ===
 # ====================================================
 def contractor_ui():
-    logo_path = ROOT / "contractor logo.jpg"
-    if logo_path.exists():
-        st.image(str(logo_path), width=500)
     st.header("Contractor - Submit Stock Request")
+
+    # === Centered logos: DBN Metro + Contractor ===
+    dbn_logo = ROOT / "DBN_Metro.png"
+    contractor_logo = ROOT / "contractor logo.jpg"
+    col1, col2, col3 = st.columns([1, 2, 1])
+    with col2:
+        inner_col1, inner_col2 = st.columns(2)
+        with inner_col1:
+            if dbn_logo.exists():
+                st.image(str(dbn_logo), width=180)
+        with inner_col2:
+            if contractor_logo.exists():
+                st.image(str(contractor_logo), width=180)
+
+    st.markdown("---")
 
     contractor_name = st.session_state.auth["name"]
     installer_name = st.text_input("Installer Name")
@@ -281,7 +288,7 @@ def contractor_ui():
             st.success(f"✅ Request(s) submitted under base ID {rid}")
 
 def city_ui():
-    st.header("eThekwini Muncipality - Verify Requests")
+    st.header("eThekwini Municipality - Verify Requests")
     df = load_data()
     pending = df[df["Status"] == "Pending Verification"]
     st.dataframe(pending, use_container_width=True)
@@ -318,10 +325,22 @@ def city_ui():
             safe_rerun()
 
 def installer_ui():
-    logo_path = ROOT / "acucomm logo.jpg"
-    if logo_path.exists():
-        st.image(str(logo_path), width=180)
     st.header("Meter Installer - Mark Received Stock")
+
+    # === Centered logos: DBN Metro + Acucomm ===
+    dbn_logo = ROOT / "DBN_Metro.png"
+    acucomm_logo = ROOT / "acucomm logo.jpg"
+    col1, col2, col3 = st.columns([1, 2, 1])
+    with col2:
+        inner_col1, inner_col2 = st.columns(2)
+        with inner_col1:
+            if dbn_logo.exists():
+                st.image(str(dbn_logo), width=180)
+        with inner_col2:
+            if acucomm_logo.exists():
+                st.image(str(acucomm_logo), width=180)
+
+    st.markdown("---")
 
     df = load_data()
     installer = st.session_state.auth["name"].strip().lower()
@@ -361,6 +380,7 @@ if not st.session_state.auth["logged_in"]:
 else:
     st.sidebar.markdown(f"### {st.session_state.auth['name']}")
     st.sidebar.markdown(f"**Role:** {st.session_state.auth['role'].title()}")
+
     if st.sidebar.button("Logout"):
         logout()
 
