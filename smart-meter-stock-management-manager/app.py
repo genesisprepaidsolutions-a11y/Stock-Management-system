@@ -239,7 +239,7 @@ def contractor_ui():
     contractor_logo = ROOT / "contractor logo.jpg"
     if contractor_logo.exists():
         st.markdown("<div style='display:flex;justify-content:center;'>", unsafe_allow_html=True)
-        st.image(str(contractor_logo), width=200)
+        st.image(str(contractor_logo), width=500)
         st.markdown("</div>", unsafe_allow_html=True)
 
     st.markdown("---")
