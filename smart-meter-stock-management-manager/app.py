@@ -22,11 +22,20 @@ GREY = "#F5F7FA"
 # ====================================================
 # === PAGE CONFIG ===
 # ====================================================
+from PIL import Image
+
+favicon_path = Path(__file__).parent / "favicon.jpg"
+if favicon_path.exists():
+    favicon_image = Image.open(favicon_path)
+else:
+    favicon_image = None
+
 st.set_page_config(
     page_title="Acucomm Stock Management",
-    page_icon="favicon.jpg",  # ✅ Correct favicon file
+    page_icon=favicon_image,
     layout="centered"
 )
+
 
 # ====================================================
 # === CUSTOM CSS FOR THEME ===
