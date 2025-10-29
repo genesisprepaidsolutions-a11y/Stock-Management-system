@@ -24,7 +24,7 @@ GREY = "#F5F7FA"
 # ====================================================
 st.set_page_config(
     page_title="Acucomm Stock Management",
-    page_icon="favivon.jpg",  # ✅ Updated favicon here
+    page_icon="favicon.jpg",  # ✅ Correct favicon file
     layout="centered"
 )
 
@@ -405,7 +405,7 @@ st.markdown(f"""
             left: 0;
             bottom: 0;
             width: 100%;
-            background-color:  #003366; /* Dark blue */
+            background-color: #003366; /* Dark blue */
             color: white; /* White text */
             text-align: center;
             padding: 10px 0;
@@ -418,4 +418,3 @@ st.markdown(f"""
         © {datetime.now().year} eThekwini Municipality | Smart Meter Stock Management System
     </div>
 """, unsafe_allow_html=True)
-
