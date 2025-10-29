@@ -17,9 +17,9 @@ from email.mime.text import MIMEText
 # ====================================================
 # === THEME & BRAND COLOURS (Ethekwini Municipality) ===
 # ====================================================
-PRIMARY_BLUE = "#003366"     # Deep navy blue
-SECONDARY_BLUE = "#0072BC"   # Lighter accent blue
-LIGHT_BLUE = "#E6F2FA"       # Soft background tint
+PRIMARY_BLUE = "#003366"
+SECONDARY_BLUE = "#0072BC"
+LIGHT_BLUE = "#E6F2FA"
 WHITE = "#FFFFFF"
 GREY = "#F5F7FA"
 
@@ -28,7 +28,7 @@ GREY = "#F5F7FA"
 # ====================================================
 st.set_page_config(
     page_title="Acucomm stock Management",
-    page_icon="Acucomm logo.jpg",  # favicon
+    page_icon="Acucomm logo.jpg",
     layout="centered"
 )
 
@@ -186,7 +186,7 @@ def safe_rerun():
         pass
 
 # ====================================================
-# === DATA HELPERS (With DUMP FEATURE) ===
+# === DATA HELPERS ===
 # ====================================================
 def load_data():
     if DATA_FILE.exists():
@@ -204,7 +204,6 @@ def load_data():
 
 def save_data(df):
     df.to_csv(DATA_FILE, index=False)
-    # --- Create a dump file backup every save ---
     dump_filename = f"stock_requests_{datetime.now().strftime('%Y-%m-%d')}.csv"
     dump_path = DUMP_DIR / dump_filename
     df.to_csv(dump_path, index=False)
@@ -239,7 +238,11 @@ def logout():
 # === ROLE INTERFACES ===
 # ====================================================
 def contractor_ui():
+    logo_path = ROOT / "contractor logo.jpg"
+    if logo_path.exists():
+        st.image(str(logo_path), width=180)
     st.header("Contractor - Submit Stock Request")
+
     contractor_name = st.session_state.auth["name"]
     installer_name = st.text_input("Installer Name")
     st.subheader("Select Stock Items & Quantities")
@@ -315,7 +318,11 @@ def city_ui():
             safe_rerun()
 
 def installer_ui():
+    logo_path = ROOT / "acucomm logo.jpg"
+    if logo_path.exists():
+        st.image(str(logo_path), width=180)
     st.header("Meter Installer - Mark Received Stock")
+
     df = load_data()
     installer = st.session_state.auth["name"].strip().lower()
     approved = df[df["Installer_Name"].str.lower() == installer]
