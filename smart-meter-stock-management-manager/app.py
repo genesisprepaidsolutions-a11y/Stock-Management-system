@@ -10,7 +10,8 @@ from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 import base64
 import shutil
-import requests  # used for Microsoft Graph upload
+import glob
+import requests  # optional: only used if Graph upload is enabled
 import json
 
 # ====================================================
@@ -113,76 +114,75 @@ for d in [DATA_DIR, PHOTO_DIR, ISSUED_PHOTOS_DIR, REPORT_DIR, DUMP_DIR]:
 DATA_FILE = DATA_DIR / "stock_requests.csv"
 
 # ====================================================
-# === ONE DRIVE CONFIG (OFF-DEVICE PERSISTENCE) ===
+# === ONE DRIVE CONFIG (LOCAL SYNC FOLDER) ===
 # ====================================================
-# Two supported modes (in order):
-# 1) Local OneDrive folder: set ONE_DRIVE_PATH env var to a folder that syncs to OneDrive.
-#    e.g. ONE_DRIVE_PATH="C:\\Users\\Reece\\OneDrive - Company\\Backups"
-# 2) Microsoft Graph upload: provide ONEDRIVE_ACCESS_TOKEN in st.secrets or env var.
-#    The token must have Files.ReadWrite permission.
-ONE_DRIVE_PATH = os.getenv("ONE_DRIVE_PATH")  # local path to user's OneDrive sync folder (optional)
+# Local OneDrive path (you provided C:\Users\ADMIN)
+ONE_DRIVE_SYNC_ROOT = Path(r"C:\Users\ADMIN\OneDrive")
+ONE_DRIVE_BACKUP_DIR = ONE_DRIVE_SYNC_ROOT / "SmartMeter_Backups"
+# ensure the OneDrive backup folder exists (if OneDrive installed & path valid)
+try:
+    ONE_DRIVE_BACKUP_DIR.mkdir(parents=True, exist_ok=True)
+except Exception:
+    # folder may not exist or permission denied; we'll handle this gracefully later
+    pass
+
+# Optionally: Microsoft Graph token (not required for local OneDrive)
 def get_secret(key):
     try:
         return st.secrets[key]
     except Exception:
         return os.getenv(key)
 
-ONEDRIVE_ACCESS_TOKEN = get_secret("ONEDRIVE_ACCESS_TOKEN")  # optional: direct Graph API access token
+ONEDRIVE_ACCESS_TOKEN = get_secret("ONEDRIVE_ACCESS_TOKEN")  # optional
 
-# --- PERSISTENCE: AUTOMATIC BACKUP & RESTORE ---
-def make_archive():
+# ====================================================
+# === BACKUP & RESTORE HELPERS ===
+# ====================================================
+def create_local_zip():
     """
-    Create a ZIP archive of the DATA_DIR (including dumps, photos etc).
-    Returns path to zip file.
+    Creates a zip archive of the DATA_DIR and returns the Path to the zip.
     """
     try:
-        archive_base = str(BACKUP_ZIP_PREFIX)
-        # shutil.make_archive will append .zip so we remove if exists before creating to avoid old contents
+        # remove any existing zip first to ensure fresh content
         if BACKUP_FILE.exists():
             try:
                 BACKUP_FILE.unlink()
             except Exception:
                 pass
-        archive_path = shutil.make_archive(archive_base, 'zip', root_dir=str(DATA_DIR))
+        archive_path = shutil.make_archive(str(BACKUP_ZIP_PREFIX), 'zip', root_dir=str(DATA_DIR))
         return Path(archive_path)
     except Exception as e:
-        st.error(f"Failed to create local archive: {e}")
+        st.warning(f"Could not create archive: {e}")
         return None
 
-def copy_to_local_onedrive(zip_path: Path):
+def copy_zip_to_onedrive(zip_path: Path):
     """
-    If ONE_DRIVE_PATH is configured and valid, copy the zip there.
-    Returns True on success.
+    Copy the zip to the local OneDrive sync folder (timestamped).
+    Returns True if successful.
     """
-    if not ONE_DRIVE_PATH:
+    if not ONE_DRIVE_BACKUP_DIR or not Path(ONE_DRIVE_BACKUP_DIR).exists():
+        # OneDrive folder not present or not configured
         return False
     try:
-        dest_folder = Path(ONE_DRIVE_PATH)
-        if not dest_folder.exists():
-            # don't crash — just return False
-            st.warning(f"ONE_DRIVE_PATH set but folder does not exist: {dest_folder}")
-            return False
-        dest_folder.mkdir(parents=True, exist_ok=True)
-        dest = dest_folder / f"{zip_path.name}"
-        shutil.copy2(str(zip_path), str(dest))
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        dest = ONE_DRIVE_BACKUP_DIR / f"{zip_path.stem}_{timestamp}{zip_path.suffix}"
+        shutil.copy2(zip_path, dest)
         st.info(f"Backup copied to OneDrive folder: {dest}")
         return True
     except Exception as e:
-        st.warning(f"Failed to copy to ONE_DRIVE_PATH: {e}")
+        st.warning(f"Failed to copy backup to OneDrive folder: {e}")
         return False
 
-def upload_to_onedrive_graph(zip_path: Path):
+def upload_zip_to_onedrive_graph(zip_path: Path):
     """
-    Upload file to OneDrive via Microsoft Graph using ONEDRIVE_ACCESS_TOKEN.
-    Places file under Apps/AcucommBackups/<filename>
-    Returns True on success.
+    Optional: Upload to OneDrive via Microsoft Graph using ONEDRIVE_ACCESS_TOKEN.
+    Returns True if successful.
     """
     token = ONEDRIVE_ACCESS_TOKEN
     if not token:
         return False
     try:
         filename = zip_path.name
-        # target path on OneDrive
         remote_path = f"/Apps/AcucommBackups/{filename}"
         upload_url = f"https://graph.microsoft.com/v1.0/me/drive/root:{remote_path}:/content"
         headers = {
@@ -203,31 +203,102 @@ def upload_to_onedrive_graph(zip_path: Path):
 
 def backup_data():
     """
-    Creates archive + attempts copies/uploads to OneDrive (local path and Graph).
+    Create local zip and attempt to copy to OneDrive sync folder (and Graph if token present).
+    Returns True if either OneDrive copy or Graph upload succeeded.
     """
-    zip_path = make_archive()
+    zip_path = create_local_zip()
     if not zip_path:
         return False
-    ok_local = copy_to_local_onedrive(zip_path)
-    ok_graph = upload_to_onedrive_graph(zip_path)
-    # Keep a copy locally too (already created)
+    ok_local = copy_zip_to_onedrive(zip_path)
+    ok_graph = upload_zip_to_onedrive_graph(zip_path)
+    # keep local zip as well
     return ok_local or ok_graph
 
-def restore_data():
+def find_latest_onedrive_backup():
     """
-    On startup, if BACKUP_FILE exists, attempt to unpack it into DATA_DIR.
-    This ensures the app recovers after redeploys if backups exist in repo or local.
+    Returns Path to the newest backup zip in the OneDrive backup folder (if present), else None.
     """
+    try:
+        if not ONE_DRIVE_BACKUP_DIR.exists():
+            return None
+        pattern = str(ONE_DRIVE_BACKUP_DIR / "data_backup_*.zip")
+        matches = sorted(glob.glob(pattern), reverse=True)
+        if matches:
+            return Path(matches[0])
+        # also match other zip patterns
+        pattern2 = str(ONE_DRIVE_BACKUP_DIR / "data_backup*.zip")
+        matches2 = sorted(glob.glob(pattern2), reverse=True)
+        if matches2:
+            return Path(matches2[0])
+        # if no specific prefix matches, pick latest zip in folder
+        zips = sorted(ONE_DRIVE_BACKUP_DIR.glob("*.zip"), key=lambda p: p.stat().st_mtime, reverse=True)
+        if zips:
+            return zips[0]
+    except Exception:
+        pass
+    return None
+
+def restore_from_zip(zip_path: Path):
+    """
+    Extracts zip_path into DATA_DIR (overwrites if necessary).
+    """
+    try:
+        # ensure data dir exists and is empty before extracting
+        if DATA_DIR.exists():
+            # remove contents for clean restore (but keep folder)
+            for item in DATA_DIR.iterdir():
+                try:
+                    if item.is_dir():
+                        shutil.rmtree(item)
+                    else:
+                        item.unlink()
+                except Exception:
+                    pass
+        else:
+            DATA_DIR.mkdir(parents=True, exist_ok=True)
+        shutil.unpack_archive(str(zip_path), extract_dir=str(DATA_DIR))
+        st.success(f"Restored data from backup: {zip_path.name}")
+        return True
+    except Exception as e:
+        st.warning(f"Restore failed from {zip_path}: {e}")
+        return False
+
+def auto_restore_if_needed():
+    """
+    If local DATA_FILE does not exist or is empty, attempt to restore:
+    - first from any local BACKUP_FILE (data_backup.zip) in project,
+    - then from the latest OneDrive backup (ONE_DRIVE_BACKUP_DIR).
+    """
+    # If data file exists and has content, skip restore
+    if DATA_FILE.exists():
+        try:
+            df = pd.read_csv(DATA_FILE)
+            if not df.empty:
+                return  # nothing to restore
+        except Exception:
+            pass
+
+    # Try local backup zip first
     if BACKUP_FILE.exists():
         try:
             shutil.unpack_archive(str(BACKUP_FILE), extract_dir=str(DATA_DIR))
-            st.info("✅ Data restored from local backup zip.")
-        except Exception as e:
-            st.warning(f"Restore error: {e}")
+            st.info("Restored data from local backup zip.")
+            return
+        except Exception:
+            pass
 
-# Attempt an initial restore (if any zip exists in project)
+    # Try OneDrive latest backup
+    latest = find_latest_onedrive_backup()
+    if latest:
+        restored = restore_from_zip(latest)
+        if restored:
+            return
+    # nothing to restore
+    st.info("No backup found to restore from (local or OneDrive). If this is first run, data folder is initialized empty.")
+
+# Attempt auto-restore at startup
 try:
-    restore_data()
+    auto_restore_if_needed()
 except Exception:
     pass
 
@@ -269,12 +340,15 @@ def send_email(subject, html_body, to_emails):
 # ====================================================
 logo_path = ROOT / "DBN_Metro.png"
 if logo_path.exists():
-    with open(logo_path, "rb") as img_file:
-        encoded_logo = base64.b64encode(img_file.read()).decode()
-    st.markdown(
-        f"<div style='text-align:center;'><img src='data:image/png;base64,{encoded_logo}' width='70'/></div>",
-        unsafe_allow_html=True,
-    )
+    try:
+        with open(logo_path, "rb") as img_file:
+            encoded_logo = base64.b64encode(img_file.read()).decode()
+        st.markdown(
+            f"<div style='text-align:center;'><img src='data:image/png;base64,{encoded_logo}' width='70'/></div>",
+            unsafe_allow_html=True,
+        )
+    except Exception:
+        st.warning("Logo found but couldn't be displayed.")
 else:
     st.warning("⚠️ Logo not found: DBN_Metro.png")
 
@@ -311,10 +385,10 @@ def load_data():
     if DATA_FILE.exists():
         try:
             df = pd.read_csv(DATA_FILE)
-            if not df.empty:
-                return df
+            return df
         except Exception:
             pass
+    # default columns
     cols = ["Date_Requested", "Request_ID", "Contractor_Name", "Installer_Name",
             "Meter_Type", "Requested_Qty", "Approved_Qty", "Photo_Path",
             "Status", "Contractor_Notes", "City_Notes", "Decline_Reason",
@@ -327,19 +401,21 @@ def save_data(df):
         df.to_csv(DATA_FILE, index=False)
     except Exception as e:
         st.warning(f"Could not save main data file: {e}")
+
     # Create dated dump for redundancy
     try:
         dump_filename = f"stock_requests_{datetime.now().strftime('%Y-%m-%d_%H%M%S')}.csv"
         df.to_csv(DUMP_DIR / dump_filename, index=False)
     except Exception as e:
         st.warning(f"Could not create dump: {e}")
-    # Create zip archive of data folder and push to OneDrive (local or Graph)
+
+    # Create zip archive of data folder and push to OneDrive (local sync folder)
     try:
         ok = backup_data()
         if ok:
-            st.success("Backup succeeded (local OneDrive or Graph).")
+            st.success("Backup succeeded (OneDrive copy or Graph upload).")
         else:
-            st.info("Backup created locally; OneDrive upload not completed (configure ONE_DRIVE_PATH or ONEDRIVE_ACCESS_TOKEN to enable).")
+            st.info("Backup created locally; OneDrive copy/upload not configured or failed.")
     except Exception as e:
         st.warning(f"Automatic backup failed: {e}")
 
@@ -428,8 +504,13 @@ def city_ui():
     sel = st.selectbox("Select Request ID", [""] + pending["Request_ID"].tolist())
     if sel:
         row = df[df["Request_ID"] == sel].iloc[0]
-        st.write(row)
-        qty = st.number_input("Approved Qty", 0, value=int(row["Requested_Qty"]))
+        st.write(row.to_dict())
+        # approved qty default uses requested qty if parseable
+        try:
+            default_qty = int(row.get("Requested_Qty", 0))
+        except Exception:
+            default_qty = 0
+        qty = st.number_input("Approved Qty", min_value=0, value=default_qty)
         photo = st.file_uploader("Upload proof photo", type=["jpg", "png"])
         notes = st.text_area("Notes")
         decline_reason = st.text_input("Decline reason")
@@ -470,8 +551,19 @@ def installer_ui():
 
     df = load_data()
     installer = st.session_state.auth["name"].strip().lower()
-    approved = df[df["Installer_Name"].str.lower() == installer]
-    approved = approved[approved["Status"].str.contains("Approved", na=False)]
+    if "Installer_Name" in df.columns:
+        try:
+            approved = df[df["Installer_Name"].str.lower() == installer]
+        except Exception:
+            approved = df.copy()
+    else:
+        approved = df.copy()
+    # filter approved statuses
+    try:
+        approved = approved[approved["Status"].str.contains("Approved", na=False)]
+    except Exception:
+        pass
+
     st.dataframe(approved, use_container_width=True)
 
     sel = st.selectbox("Mark as received (Request ID)", [""] + approved["Request_ID"].tolist())
@@ -492,22 +584,36 @@ def manager_ui():
     if dumps:
         dump_names = [d.name for d in dumps]
         selected_dump = st.selectbox("Select Dump File", dump_names)
-        dump_df = pd.read_csv(DUMP_DIR / selected_dump)
-        st.dataframe(dump_df, use_container_width=True)
-        st.download_button("Download Selected Dump", dump_df.to_csv(index=False).encode(), selected_dump, "text/csv")
+        if selected_dump:
+            dump_df = pd.read_csv(DUMP_DIR / selected_dump)
+            st.dataframe(dump_df, use_container_width=True)
+            st.download_button("Download Selected Dump", dump_df.to_csv(index=False).encode(), selected_dump, "text/csv")
     else:
         st.info("No dump files available yet.")
 
     st.markdown("### 🔁 Manual Backup")
     if st.button("Create & Upload Backup Now"):
-        zipfile = make_archive()
+        zipfile = create_local_zip()
         if zipfile:
-            one_local = copy_to_local_onedrive(zipfile)
-            one_graph = upload_to_onedrive_graph(zipfile)
-            if one_local or one_graph:
+            one_local = copy_zip_to_onedrive(zipfile)
+            graph_uploaded = upload_zip_to_onedrive_graph(zipfile)
+            if one_local or graph_uploaded:
                 st.success("Backup created and sent to configured OneDrive destination.")
             else:
                 st.warning("Backup created locally but OneDrive upload not configured or failed.")
+
+    st.markdown("### 🔄 Restore from Latest OneDrive Backup")
+    if st.button("Restore Latest OneDrive Backup"):
+        latest = find_latest_onedrive_backup()
+        if latest:
+            ok = restore_from_zip(latest)
+            if ok:
+                st.success("Restore complete from OneDrive latest backup. Data reloaded.")
+                safe_rerun()
+            else:
+                st.error("Restore failed. Check logs.")
+        else:
+            st.warning("No OneDrive backups found in configured folder.")
 
 # ====================================================
 # === ROUTING ===
@@ -554,4 +660,3 @@ st.markdown(f"""
         © {datetime.now().year} eThekwini Municipality | Smart Meter Stock Management System
     </div>
 """, unsafe_allow_html=True)
-
