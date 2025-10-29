@@ -69,14 +69,14 @@ def send_email(subject, html_body, to_emails):
         print(f"Failed to send email: {e}")
         return False
 
-# === Display Logo ===
-logo_path = ROOT / "DBN_metro.PNG"
+# === Display Ethekwini Municipality Logo ===
+logo_path = ROOT / "DBN_Metro.png"   # ← use your uploaded image
 if logo_path.exists():
-    st.image(str(logo_path), use_container_width=False, width=200)
+    st.image(str(logo_path), use_container_width=False, width=180)
 else:
-    st.warning("Logo not found: DBN_metro.PNG")
+    st.warning("Logo not found: DBN_Metro.png")
 
-st.markdown("<h1 style='text-align: center;'>Stock Management</h1>", unsafe_allow_html=True)
+st.markdown("<h1 style='text-align: center; color:#0072BC;'>Ethekwini Smart Meter Stock Management</h1>", unsafe_allow_html=True)
 st.markdown("---")
 
 # === User Database ===
@@ -316,17 +316,14 @@ def manager_ui():
     st.subheader("Summary")
     st.write(f"Total: {total} | Pending: {pending} | Approved: {approved} | Declined: {declined} | Received: {received}")
 
-    # Export CSV
     st.download_button("📥 Download CSV", data=df.to_csv(index=False), file_name="stock_requests.csv", mime="text/csv")
 
-    # Export PDF
     if st.button("📄 Generate PDF Report"):
         pdf_path = REPORT_DIR / f"stock_report_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf"
         doc = SimpleDocTemplate(str(pdf_path), pagesize=landscape(A4))
         styles = getSampleStyleSheet()
         elems = []
 
-        # Add logo
         if logo_path.exists():
             elems.append(Image(str(logo_path), width=120, height=60))
         elems.append(Paragraph("<b>Smart Meter Stock Report</b>", styles['Title']))
