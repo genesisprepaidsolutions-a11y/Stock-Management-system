@@ -562,7 +562,9 @@ def city_ui():
     if sel_id:
         record = df[df["Request_ID"] == sel_id].iloc[0].to_dict()
         st.write("Record details:")
-        st.write(record)
+       record_df = pd.DataFrame(list(record.items()), columns=["Field", "Value"])
+st.table(record_df)
+
         # If this is a manufacturer dispatch
         if record.get("Status", "").startswith("Pending City Approval"):
             st.subheader("Manufacturer Dispatch Actions")
