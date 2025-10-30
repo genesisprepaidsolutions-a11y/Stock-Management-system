@@ -30,7 +30,10 @@ GREY = "#F5F7FA"
 ROOT = Path(__file__).parent
 favicon_path = ROOT / "favicon.jpg"
 if favicon_path.exists():
-    favicon_image = Image.open(favicon_path)
+    try:
+        favicon_image = Image.open(favicon_path)
+    except Exception:
+        favicon_image = None
 else:
     favicon_image = None
 
@@ -108,7 +111,10 @@ BACKUP_ZIP_PREFIX = ROOT / "data_backup"  # will create data_backup.zip
 BACKUP_FILE = Path(str(BACKUP_ZIP_PREFIX) + ".zip")
 
 for d in [DATA_DIR, PHOTO_DIR, ISSUED_PHOTOS_DIR, REPORT_DIR, DUMP_DIR]:
-    d.mkdir(parents=True, exist_ok=True)
+    try:
+        d.mkdir(parents=True, exist_ok=True)
+    except Exception:
+        pass
 
 DATA_FILE = DATA_DIR / "stock_requests.csv"
 
@@ -120,7 +126,8 @@ ONE_DRIVE_BACKUP_DIR = ONE_DRIVE_SYNC_ROOT / "SmartMeter_Backups"
 try:
     ONE_DRIVE_BACKUP_DIR.mkdir(parents=True, exist_ok=True)
 except Exception:
-    pass
+    # don't spam warnings if OneDrive isn't available; it's optional
+    ONE_DRIVE_BACKUP_DIR = None
 
 def get_secret(key):
     try:
@@ -133,14 +140,18 @@ ONEDRIVE_ACCESS_TOKEN = get_secret("ONEDRIVE_ACCESS_TOKEN")  # optional
 # ====================================================
 # === BACKUP & RESTORE HELPERS ===
 # ====================================================
-def create_local_zip():
+def create_local_zip(timestamped: bool = False):
+    """
+    Create a zip archive of DATA_DIR.
+    If timestamped True, include timestamp in filename to avoid clobbering.
+    Returns Path to created archive or None.
+    """
     try:
-        if BACKUP_FILE.exists():
-            try:
-                BACKUP_FILE.unlink()
-            except Exception:
-                pass
-        archive_path = shutil.make_archive(str(BACKUP_ZIP_PREFIX), 'zip', root_dir=str(DATA_DIR))
+        if timestamped:
+            prefix = str(BACKUP_ZIP_PREFIX) + "_" + datetime.now().strftime("%Y%m%d_%H%M%S")
+        else:
+            prefix = str(BACKUP_ZIP_PREFIX)
+        archive_path = shutil.make_archive(prefix, 'zip', root_dir=str(DATA_DIR))
         return Path(archive_path)
     except Exception as e:
         st.warning(f"Could not create archive: {e}")
@@ -184,7 +195,7 @@ def upload_zip_to_onedrive_graph(zip_path: Path):
         return False
 
 def backup_data():
-    zip_path = create_local_zip()
+    zip_path = create_local_zip(timestamped=False)
     if not zip_path:
         return False
     ok_local = copy_zip_to_onedrive(zip_path)
@@ -193,7 +204,7 @@ def backup_data():
 
 def find_latest_onedrive_backup():
     try:
-        if not ONE_DRIVE_BACKUP_DIR.exists():
+        if not ONE_DRIVE_BACKUP_DIR or not ONE_DRIVE_BACKUP_DIR.exists():
             return None
         pattern = str(ONE_DRIVE_BACKUP_DIR / "data_backup_*.zip")
         matches = sorted(glob.glob(pattern), reverse=True)
@@ -212,6 +223,7 @@ def find_latest_onedrive_backup():
 
 def restore_from_zip(zip_path: Path):
     try:
+        # clear existing data dir content carefully
         if DATA_DIR.exists():
             for item in DATA_DIR.iterdir():
                 try:
@@ -231,25 +243,31 @@ def restore_from_zip(zip_path: Path):
         return False
 
 def auto_restore_if_needed():
-    if DATA_FILE.exists():
-        try:
-            df = pd.read_csv(DATA_FILE)
-            if not df.empty:
+    """
+    If there is no usable DATA_FILE, attempt to restore from BACKUP_FILE or OneDrive latest backup.
+    """
+    try:
+        if DATA_FILE.exists():
+            try:
+                df = pd.read_csv(DATA_FILE)
+                if not df.empty:
+                    return
+            except Exception:
+                pass
+        if BACKUP_FILE.exists():
+            try:
+                shutil.unpack_archive(str(BACKUP_FILE), extract_dir=str(DATA_DIR))
+                st.info("Restored data from local backup zip.")
                 return
-        except Exception:
-            pass
-    if BACKUP_FILE.exists():
-        try:
-            shutil.unpack_archive(str(BACKUP_FILE), extract_dir=str(DATA_DIR))
-            st.info("Restored data from local backup zip.")
-            return
-        except Exception:
-            pass
-    latest = find_latest_onedrive_backup()
-    if latest:
-        restored = restore_from_zip(latest)
-        if restored:
-            return
+            except Exception:
+                pass
+        latest = find_latest_onedrive_backup()
+        if latest:
+            restored = restore_from_zip(latest)
+            if restored:
+                return
+    except Exception:
+        pass
     st.info("No backup found to restore from (local or OneDrive). If this is first run, data folder is initialized empty.")
 
 try:
@@ -273,6 +291,7 @@ MANUFACTURER_EMAIL = get_secret("MANUFACTURER_EMAIL")
 
 def send_email(subject, html_body, to_emails):
     if not SENDER_EMAIL or not SENDER_PASSWORD:
+        # credentials not configured; don't error
         print("Email credentials not configured.")
         return False
     recipients = [to_emails] if isinstance(to_emails, str) else to_emails
@@ -304,9 +323,11 @@ if logo_path.exists():
             unsafe_allow_html=True,
         )
     except Exception:
-        st.warning("Logo found but couldn't be displayed.")
+        # don't spam UI with warnings if logo can't be displayed
+        pass
 else:
-    st.warning("⚠️ Logo not found: DBN_Metro.png")
+    # no logo is fine — keep UI clean
+    pass
 
 st.markdown(f"<h1 style='text-align:center;color:{PRIMARY_BLUE};'>Ethekwini Smart Meter Stock Management-WS7761</h1>", unsafe_allow_html=True)
 st.markdown("---")
@@ -339,24 +360,42 @@ def safe_rerun():
 # === DATA HANDLING (with redundancy) ===
 # Add manufacturer-specific fields to the same data file
 # ====================================================
+DEFAULT_COLS = [
+    "Date_Requested", "Request_ID", "Contractor_Name", "Installer_Name",
+    "Meter_Type", "Requested_Qty", "Approved_Qty", "Photo_Path",
+    "Status", "Contractor_Notes", "City_Notes", "Decline_Reason",
+    "Date_Approved", "Date_Received",
+    # Manufacturer dispatch fields (kept in same CSV)
+    "Manufacturer_Name", "Batch_Number", "Dispatch_Qty", "Dispatch_Date", "Dispatch_Note", "Dispatch_Docs"
+]
+
 def load_data():
+    # Return a DataFrame with expected columns even when file missing or corrupt
     if DATA_FILE.exists():
         try:
             df = pd.read_csv(DATA_FILE, dtype=str)
+            # ensure columns exist
+            for c in DEFAULT_COLS:
+                if c not in df.columns:
+                    df[c] = ""
+            # normalise dtypes for consistent handling
+            df = df[DEFAULT_COLS]
             return df
         except Exception:
             pass
-    cols = [
-        "Date_Requested", "Request_ID", "Contractor_Name", "Installer_Name",
-        "Meter_Type", "Requested_Qty", "Approved_Qty", "Photo_Path",
-        "Status", "Contractor_Notes", "City_Notes", "Decline_Reason",
-        "Date_Approved", "Date_Received",
-        # Manufacturer dispatch fields (kept in same CSV)
-        "Manufacturer_Name", "Batch_Number", "Dispatch_Qty", "Dispatch_Date", "Dispatch_Note", "Dispatch_Docs"
-    ]
-    return pd.DataFrame(columns=cols)
+    # empty dataframe with expected columns
+    return pd.DataFrame(columns=DEFAULT_COLS)
 
 def save_data(df):
+    # ensure columns before saving
+    try:
+        for c in DEFAULT_COLS:
+            if c not in df.columns:
+                df[c] = ""
+        df = df[DEFAULT_COLS]
+    except Exception:
+        pass
+
     try:
         df.to_csv(DATA_FILE, index=False)
     except Exception as e:
@@ -371,6 +410,7 @@ def save_data(df):
         if ok:
             st.success("Backup succeeded (OneDrive copy or Graph upload).")
         else:
+            # don't over-notify on every save; keep info
             st.info("Backup created locally; OneDrive copy/upload not configured or failed.")
     except Exception as e:
         st.warning(f"Automatic backup failed: {e}")
@@ -392,31 +432,37 @@ def compute_stock_summary(df: pd.DataFrame) -> pd.DataFrame:
     Issued = sum of Approved_Qty for contractor request rows that were Approved / Issued or Received
     """
     if df is None or df.empty:
-        return pd.DataFrame(columns=["Meter_Type", "Total_Incoming", "Total_Issued", "Balance"]) 
+        return pd.DataFrame(columns=["Meter_Type", "Total_Incoming", "Total_Issued", "Balance"])
 
-    # normalize Meter_Type
     df = df.copy()
+    if "Meter_Type" not in df.columns:
+        df["Meter_Type"] = "Unknown"
     df["Meter_Type"] = df["Meter_Type"].fillna("Unknown")
 
     # incoming from manufacturer dispatches (Manufacturer_Name present and Dispatch_Qty set)
-    incoming_mask = df["Manufacturer_Name"].notna() & (df["Manufacturer_Name"].astype(str).str.strip() != "") & df["Dispatch_Qty"].notna() & (df["Dispatch_Qty"].astype(str).str.strip() != "") & df["Status"].str.contains("Approved", na=False)
-    incoming = df.loc[incoming_mask, ["Meter_Type", "Dispatch_Qty"]].copy()
+    incoming_mask = df.get("Manufacturer_Name", "").notna() & (df.get("Manufacturer_Name", "").astype(str).str.strip() != "") & df.get("Dispatch_Qty", "").notna() & (df.get("Dispatch_Qty", "").astype(str).str.strip() != "") & df.get("Status", "").str.contains("Approved", na=False)
+    try:
+        incoming = df.loc[incoming_mask, ["Meter_Type", "Dispatch_Qty"]].copy()
+    except Exception:
+        incoming = pd.DataFrame(columns=["Meter_Type", "Dispatch_Qty"])
     if not incoming.empty:
         incoming["Dispatch_Qty"] = incoming["Dispatch_Qty"].apply(_to_int_safe)
         incoming_summary = incoming.groupby("Meter_Type").sum().rename(columns={"Dispatch_Qty": "Total_Incoming"})
     else:
-        incoming_summary = pd.DataFrame(columns=["Total_Incoming"]) 
+        incoming_summary = pd.DataFrame(columns=["Total_Incoming"])
 
     # outgoing / issued to contractors (Manufacturer_Name empty and Approved_Qty present)
-    issued_mask = (df["Manufacturer_Name"].isna() | (df["Manufacturer_Name"].astype(str).str.strip() == "")) & df["Approved_Qty"].notna() & (df["Approved_Qty"].astype(str).str.strip() != "") & df["Status"].str.contains("Approved|Issued|Received", na=False)
-    issued = df.loc[issued_mask, ["Meter_Type", "Approved_Qty"]].copy()
+    issued_mask = (df.get("Manufacturer_Name", "").isna() | (df.get("Manufacturer_Name", "").astype(str).str.strip() == "")) & df.get("Approved_Qty", "").notna() & (df.get("Approved_Qty", "").astype(str).str.strip() != "") & df.get("Status", "").str.contains("Approved|Issued|Received", na=False)
+    try:
+        issued = df.loc[issued_mask, ["Meter_Type", "Approved_Qty"]].copy()
+    except Exception:
+        issued = pd.DataFrame(columns=["Meter_Type", "Approved_Qty"])
     if not issued.empty:
         issued["Approved_Qty"] = issued["Approved_Qty"].apply(_to_int_safe)
         issued_summary = issued.groupby("Meter_Type").sum().rename(columns={"Approved_Qty": "Total_Issued"})
     else:
-        issued_summary = pd.DataFrame(columns=["Total_Issued"]) 
+        issued_summary = pd.DataFrame(columns=["Total_Issued"])
 
-    # combine
     all_types = sorted(set(df["Meter_Type"].unique().tolist() + incoming_summary.index.tolist() + issued_summary.index.tolist()))
     rows = []
     for mt in all_types:
@@ -467,9 +513,12 @@ def contractor_ui():
     st.header("Contractor - Submit Stock Request")
     contractor_logo = ROOT / "contractor logo.jpg"
     if contractor_logo.exists():
-        st.markdown("<div style='display:flex;justify-content:center;'>", unsafe_allow_html=True)
-        st.image(str(contractor_logo), width=500)
-        st.markdown("</div>", unsafe_allow_html=True)
+        try:
+            st.markdown("<div style='display:flex;justify-content:center;'>", unsafe_allow_html=True)
+            st.image(str(contractor_logo), width=500)
+            st.markdown("</div>", unsafe_allow_html=True)
+        except Exception:
+            pass
     st.markdown("---")
     contractor_name = st.session_state.auth["name"]
     installer_name = st.text_input("Installer Name")
@@ -604,11 +653,12 @@ def city_ui():
     st.markdown("### Filters")
     col1, col2, col3 = st.columns([1,1,1])
     with col1:
-        view_choice = st.selectbox("Show records", ["All", "Pending Verification", "Pending City Approval (Manufacturer Delivery)", "Approved / Issued", "Declined", "Received"]) 
+        view_choice = st.selectbox("Show records", ["All", "Pending Verification", "Pending City Approval (Manufacturer Delivery)", "Approved / Issued", "Declined", "Received"])
     with col2:
         filter_manu = st.text_input("Filter by Manufacturer Name (partial)")
     with col3:
-        filter_type = st.selectbox("Product Type (or All)", options=["All"] + sorted(df["Meter_Type"].dropna().unique().tolist()))
+        types = sorted(df["Meter_Type"].dropna().unique().tolist()) if "Meter_Type" in df.columns else []
+        filter_type = st.selectbox("Product Type (or All)", options=["All"] + types)
 
     view_df = df.copy()
     if view_choice != "All":
@@ -632,7 +682,10 @@ def city_ui():
         # If this is a manufacturer dispatch
         if record.get("Status", "").startswith("Pending City Approval"):
             st.subheader("Manufacturer Dispatch Actions")
-            approved_qty = st.number_input("Approved Quantity to accept into stock", min_value=0, value=int(record.get("Dispatch_Qty") or 0))
+            try:
+                approved_qty = st.number_input("Approved Quantity to accept into stock", min_value=0, value=int(record.get("Dispatch_Qty") or 0))
+            except Exception:
+                approved_qty = st.number_input("Approved Quantity to accept into stock", min_value=0, value=0)
             city_notes = st.text_area("City Notes")
             photo = st.file_uploader("Upload proof photo (optional)", type=["jpg", "png"])
             decline_reason = st.text_input("Decline reason (if declining)")
@@ -760,23 +813,27 @@ def installer_ui():
     st.header("Meter Installer - Mark Received Stock")
     acucomm_logo = ROOT / "acucomm logo.jpg"
     if acucomm_logo.exists():
-        st.markdown("<div style='display:flex;justify-content:center;'>", unsafe_allow_html=True)
-        st.image(str(acucomm_logo), width=250)
-        st.markdown("</div>", unsafe_allow_html=True)
+        try:
+            st.markdown("<div style='display:flex;justify-content:center;'>", unsafe_allow_html=True)
+            st.image(str(acucomm_logo), width=250)
+            st.markdown("</div>", unsafe_allow_html=True)
+        except Exception:
+            pass
     st.markdown("---")
     df = load_data()
-    installer = st.session_state.auth["name"].strip().lower()
+    installer = st.session_state.auth["name"].strip().lower() if st.session_state.auth.get("name") else ""
+    approved = pd.DataFrame()
     if "Installer_Name" in df.columns and df["Installer_Name"].notna().any():
         try:
-            approved = df[df["Installer_Name"].str.lower() == installer]
+            approved = df[df["Installer_Name"].fillna("").str.lower() == installer]
         except Exception:
             approved = df.copy()
-    else:
-        approved = df.copy()
-    try:
-        approved = approved[approved["Status"].str.contains("Approved", na=False)]
-    except Exception:
-        pass
+    if approved.empty:
+        # fallback: show all approved records if installer-specific not found
+        try:
+            approved = df[df["Status"].str.contains("Approved", na=False)]
+        except Exception:
+            approved = df.copy()
     st.dataframe(approved.fillna(""), use_container_width=True)
     sel = st.selectbox("Mark as received (Request ID)", [""] + approved["Request_ID"].tolist())
     if sel and st.button("✅ Mark as Received"):
@@ -804,14 +861,17 @@ def manager_ui():
         dump_names = [d.name for d in dumps]
         selected_dump = st.selectbox("Select Dump File", dump_names)
         if selected_dump:
-            dump_df = pd.read_csv(DUMP_DIR / selected_dump)
-            st.dataframe(dump_df.fillna(""), use_container_width=True)
-            st.download_button("Download Selected Dump", dump_df.to_csv(index=False).encode(), selected_dump, "text/csv")
+            try:
+                dump_df = pd.read_csv(DUMP_DIR / selected_dump)
+                st.dataframe(dump_df.fillna(""), use_container_width=True)
+                st.download_button("Download Selected Dump", dump_df.to_csv(index=False).encode(), selected_dump, "text/csv")
+            except Exception as e:
+                st.warning(f"Could not read selected dump: {e}")
     else:
         st.info("No dump files available yet.")
     st.markdown("### 🔁 Manual Backup")
     if st.button("Create & Upload Backup Now"):
-        zipfile = create_local_zip()
+        zipfile = create_local_zip(timestamped=True)
         if zipfile:
             one_local = copy_zip_to_onedrive(zipfile)
             graph_uploaded = upload_zip_to_onedrive_graph(zipfile)
