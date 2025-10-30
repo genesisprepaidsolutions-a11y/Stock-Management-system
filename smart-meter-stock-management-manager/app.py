@@ -1,3 +1,4 @@
+
 # app.py
 import streamlit as st
 import pandas as pd
@@ -30,10 +31,7 @@ GREY = "#F5F7FA"
 ROOT = Path(__file__).parent
 favicon_path = ROOT / "favicon.jpg"
 if favicon_path.exists():
-    try:
-        favicon_image = Image.open(favicon_path)
-    except Exception:
-        favicon_image = None
+    favicon_image = Image.open(favicon_path)
 else:
     favicon_image = None
 
@@ -111,10 +109,7 @@ BACKUP_ZIP_PREFIX = ROOT / "data_backup"  # will create data_backup.zip
 BACKUP_FILE = Path(str(BACKUP_ZIP_PREFIX) + ".zip")
 
 for d in [DATA_DIR, PHOTO_DIR, ISSUED_PHOTOS_DIR, REPORT_DIR, DUMP_DIR]:
-    try:
-        d.mkdir(parents=True, exist_ok=True)
-    except Exception:
-        pass
+    d.mkdir(parents=True, exist_ok=True)
 
 DATA_FILE = DATA_DIR / "stock_requests.csv"
 
@@ -126,8 +121,7 @@ ONE_DRIVE_BACKUP_DIR = ONE_DRIVE_SYNC_ROOT / "SmartMeter_Backups"
 try:
     ONE_DRIVE_BACKUP_DIR.mkdir(parents=True, exist_ok=True)
 except Exception:
-    # don't spam warnings if OneDrive isn't available; it's optional
-    ONE_DRIVE_BACKUP_DIR = None
+    pass
 
 def get_secret(key):
     try:
@@ -140,18 +134,14 @@ ONEDRIVE_ACCESS_TOKEN = get_secret("ONEDRIVE_ACCESS_TOKEN")  # optional
 # ====================================================
 # === BACKUP & RESTORE HELPERS ===
 # ====================================================
-def create_local_zip(timestamped: bool = False):
-    """
-    Create a zip archive of DATA_DIR.
-    If timestamped True, include timestamp in filename to avoid clobbering.
-    Returns Path to created archive or None.
-    """
+def create_local_zip():
     try:
-        if timestamped:
-            prefix = str(BACKUP_ZIP_PREFIX) + "_" + datetime.now().strftime("%Y%m%d_%H%M%S")
-        else:
-            prefix = str(BACKUP_ZIP_PREFIX)
-        archive_path = shutil.make_archive(prefix, 'zip', root_dir=str(DATA_DIR))
+        if BACKUP_FILE.exists():
+            try:
+                BACKUP_FILE.unlink()
+            except Exception:
+                pass
+        archive_path = shutil.make_archive(str(BACKUP_ZIP_PREFIX), 'zip', root_dir=str(DATA_DIR))
         return Path(archive_path)
     except Exception as e:
         st.warning(f"Could not create archive: {e}")
@@ -195,7 +185,7 @@ def upload_zip_to_onedrive_graph(zip_path: Path):
         return False
 
 def backup_data():
-    zip_path = create_local_zip(timestamped=False)
+    zip_path = create_local_zip()
     if not zip_path:
         return False
     ok_local = copy_zip_to_onedrive(zip_path)
@@ -204,7 +194,7 @@ def backup_data():
 
 def find_latest_onedrive_backup():
     try:
-        if not ONE_DRIVE_BACKUP_DIR or not ONE_DRIVE_BACKUP_DIR.exists():
+        if not ONE_DRIVE_BACKUP_DIR.exists():
             return None
         pattern = str(ONE_DRIVE_BACKUP_DIR / "data_backup_*.zip")
         matches = sorted(glob.glob(pattern), reverse=True)
@@ -223,7 +213,6 @@ def find_latest_onedrive_backup():
 
 def restore_from_zip(zip_path: Path):
     try:
-        # clear existing data dir content carefully
         if DATA_DIR.exists():
             for item in DATA_DIR.iterdir():
                 try:
@@ -243,31 +232,25 @@ def restore_from_zip(zip_path: Path):
         return False
 
 def auto_restore_if_needed():
-    """
-    If there is no usable DATA_FILE, attempt to restore from BACKUP_FILE or OneDrive latest backup.
-    """
-    try:
-        if DATA_FILE.exists():
-            try:
-                df = pd.read_csv(DATA_FILE)
-                if not df.empty:
-                    return
-            except Exception:
-                pass
-        if BACKUP_FILE.exists():
-            try:
-                shutil.unpack_archive(str(BACKUP_FILE), extract_dir=str(DATA_DIR))
-                st.info("Restored data from local backup zip.")
+    if DATA_FILE.exists():
+        try:
+            df = pd.read_csv(DATA_FILE)
+            if not df.empty:
                 return
-            except Exception:
-                pass
-        latest = find_latest_onedrive_backup()
-        if latest:
-            restored = restore_from_zip(latest)
-            if restored:
-                return
-    except Exception:
-        pass
+        except Exception:
+            pass
+    if BACKUP_FILE.exists():
+        try:
+            shutil.unpack_archive(str(BACKUP_FILE), extract_dir=str(DATA_DIR))
+            st.info("Restored data from local backup zip.")
+            return
+        except Exception:
+            pass
+    latest = find_latest_onedrive_backup()
+    if latest:
+        restored = restore_from_zip(latest)
+        if restored:
+            return
     st.info("No backup found to restore from (local or OneDrive). If this is first run, data folder is initialized empty.")
 
 try:
@@ -291,7 +274,6 @@ MANUFACTURER_EMAIL = get_secret("MANUFACTURER_EMAIL")
 
 def send_email(subject, html_body, to_emails):
     if not SENDER_EMAIL or not SENDER_PASSWORD:
-        # credentials not configured; don't error
         print("Email credentials not configured.")
         return False
     recipients = [to_emails] if isinstance(to_emails, str) else to_emails
@@ -323,11 +305,9 @@ if logo_path.exists():
             unsafe_allow_html=True,
         )
     except Exception:
-        # don't spam UI with warnings if logo can't be displayed
-        pass
+        st.warning("Logo found but couldn't be displayed.")
 else:
-    # no logo is fine — keep UI clean
-    pass
+    st.warning("⚠️ Logo not found: DBN_Metro.png")
 
 st.markdown(f"<h1 style='text-align:center;color:{PRIMARY_BLUE};'>Ethekwini Smart Meter Stock Management-WS7761</h1>", unsafe_allow_html=True)
 st.markdown("---")
@@ -360,42 +340,24 @@ def safe_rerun():
 # === DATA HANDLING (with redundancy) ===
 # Add manufacturer-specific fields to the same data file
 # ====================================================
-DEFAULT_COLS = [
-    "Date_Requested", "Request_ID", "Contractor_Name", "Installer_Name",
-    "Meter_Type", "Requested_Qty", "Approved_Qty", "Photo_Path",
-    "Status", "Contractor_Notes", "City_Notes", "Decline_Reason",
-    "Date_Approved", "Date_Received",
-    # Manufacturer dispatch fields (kept in same CSV)
-    "Manufacturer_Name", "Batch_Number", "Dispatch_Qty", "Dispatch_Date", "Dispatch_Note", "Dispatch_Docs"
-]
-
 def load_data():
-    # Return a DataFrame with expected columns even when file missing or corrupt
     if DATA_FILE.exists():
         try:
             df = pd.read_csv(DATA_FILE, dtype=str)
-            # ensure columns exist
-            for c in DEFAULT_COLS:
-                if c not in df.columns:
-                    df[c] = ""
-            # normalise dtypes for consistent handling
-            df = df[DEFAULT_COLS]
             return df
         except Exception:
             pass
-    # empty dataframe with expected columns
-    return pd.DataFrame(columns=DEFAULT_COLS)
+    cols = [
+        "Date_Requested", "Request_ID", "Contractor_Name", "Installer_Name",
+        "Meter_Type", "Requested_Qty", "Approved_Qty", "Photo_Path",
+        "Status", "Contractor_Notes", "City_Notes", "Decline_Reason",
+        "Date_Approved", "Date_Received",
+        # Manufacturer dispatch fields (kept in same CSV)
+        "Manufacturer_Name", "Batch_Number", "Dispatch_Qty", "Dispatch_Date", "Dispatch_Note", "Dispatch_Docs"
+    ]
+    return pd.DataFrame(columns=cols)
 
 def save_data(df):
-    # ensure columns before saving
-    try:
-        for c in DEFAULT_COLS:
-            if c not in df.columns:
-                df[c] = ""
-        df = df[DEFAULT_COLS]
-    except Exception:
-        pass
-
     try:
         df.to_csv(DATA_FILE, index=False)
     except Exception as e:
@@ -410,78 +372,12 @@ def save_data(df):
         if ok:
             st.success("Backup succeeded (OneDrive copy or Graph upload).")
         else:
-            # don't over-notify on every save; keep info
             st.info("Backup created locally; OneDrive copy/upload not configured or failed.")
     except Exception as e:
         st.warning(f"Automatic backup failed: {e}")
 
 def generate_request_id(prefix="REQ"):
     return f"{prefix}-{datetime.now().strftime('%Y%m%d%H%M%S')}"
-
-# === NEW: Stock computation helpers ===
-
-def _to_int_safe(val):
-    try:
-        return int(float(str(val).strip()))
-    except Exception:
-        return 0
-
-def compute_stock_summary(df: pd.DataFrame) -> pd.DataFrame:
-    """Compute incoming, issued and balance per Meter_Type.
-    Incoming = sum of Dispatch_Qty for manufacturer dispatch rows that were Approved / Issued
-    Issued = sum of Approved_Qty for contractor request rows that were Approved / Issued or Received
-    """
-    if df is None or df.empty:
-        return pd.DataFrame(columns=["Meter_Type", "Total_Incoming", "Total_Issued", "Balance"])
-
-    df = df.copy()
-    if "Meter_Type" not in df.columns:
-        df["Meter_Type"] = "Unknown"
-    df["Meter_Type"] = df["Meter_Type"].fillna("Unknown")
-
-    # incoming from manufacturer dispatches (Manufacturer_Name present and Dispatch_Qty set)
-    incoming_mask = df.get("Manufacturer_Name", "").notna() & (df.get("Manufacturer_Name", "").astype(str).str.strip() != "") & df.get("Dispatch_Qty", "").notna() & (df.get("Dispatch_Qty", "").astype(str).str.strip() != "") & df.get("Status", "").str.contains("Approved", na=False)
-    try:
-        incoming = df.loc[incoming_mask, ["Meter_Type", "Dispatch_Qty"]].copy()
-    except Exception:
-        incoming = pd.DataFrame(columns=["Meter_Type", "Dispatch_Qty"])
-    if not incoming.empty:
-        incoming["Dispatch_Qty"] = incoming["Dispatch_Qty"].apply(_to_int_safe)
-        incoming_summary = incoming.groupby("Meter_Type").sum().rename(columns={"Dispatch_Qty": "Total_Incoming"})
-    else:
-        incoming_summary = pd.DataFrame(columns=["Total_Incoming"])
-
-    # outgoing / issued to contractors (Manufacturer_Name empty and Approved_Qty present)
-    issued_mask = (df.get("Manufacturer_Name", "").isna() | (df.get("Manufacturer_Name", "").astype(str).str.strip() == "")) & df.get("Approved_Qty", "").notna() & (df.get("Approved_Qty", "").astype(str).str.strip() != "") & df.get("Status", "").str.contains("Approved|Issued|Received", na=False)
-    try:
-        issued = df.loc[issued_mask, ["Meter_Type", "Approved_Qty"]].copy()
-    except Exception:
-        issued = pd.DataFrame(columns=["Meter_Type", "Approved_Qty"])
-    if not issued.empty:
-        issued["Approved_Qty"] = issued["Approved_Qty"].apply(_to_int_safe)
-        issued_summary = issued.groupby("Meter_Type").sum().rename(columns={"Approved_Qty": "Total_Issued"})
-    else:
-        issued_summary = pd.DataFrame(columns=["Total_Issued"])
-
-    all_types = sorted(set(df["Meter_Type"].unique().tolist() + incoming_summary.index.tolist() + issued_summary.index.tolist()))
-    rows = []
-    for mt in all_types:
-        tin = int(incoming_summary.loc[mt, "Total_Incoming"]) if (mt in incoming_summary.index and not incoming_summary.empty) else 0
-        tout = int(issued_summary.loc[mt, "Total_Issued"]) if (mt in issued_summary.index and not issued_summary.empty) else 0
-        rows.append({"Meter_Type": mt, "Total_Incoming": tin, "Total_Issued": tout, "Balance": tin - tout})
-    return pd.DataFrame(rows)
-
-def get_balance_for_type(df: pd.DataFrame, meter_type: str) -> int:
-    summary = compute_stock_summary(df)
-    if summary.empty:
-        return 0
-    row = summary[summary["Meter_Type"] == meter_type]
-    if row.empty:
-        return 0
-    try:
-        return int(row.iloc[0]["Balance"])
-    except Exception:
-        return 0
 
 # ====================================================
 # === LOGIN UI ===
@@ -513,12 +409,9 @@ def contractor_ui():
     st.header("Contractor - Submit Stock Request")
     contractor_logo = ROOT / "contractor logo.jpg"
     if contractor_logo.exists():
-        try:
-            st.markdown("<div style='display:flex;justify-content:center;'>", unsafe_allow_html=True)
-            st.image(str(contractor_logo), width=500)
-            st.markdown("</div>", unsafe_allow_html=True)
-        except Exception:
-            pass
+        st.markdown("<div style='display:flex;justify-content:center;'>", unsafe_allow_html=True)
+        st.image(str(contractor_logo), width=500)
+        st.markdown("</div>", unsafe_allow_html=True)
     st.markdown("---")
     contractor_name = st.session_state.auth["name"]
     installer_name = st.text_input("Installer Name")
@@ -641,14 +534,6 @@ def city_ui():
         st.info("No records in the system.")
         return
 
-    # --- show stock summary ---
-    st.markdown("### Current Stock Summary (computed from approved dispatches / issued requests)")
-    stock_summary = compute_stock_summary(df)
-    if stock_summary.empty:
-        st.info("No stock activity recorded yet.")
-    else:
-        st.dataframe(stock_summary.fillna("").sort_values("Balance", ascending=False), use_container_width=True)
-
     # Show filters
     st.markdown("### Filters")
     col1, col2, col3 = st.columns([1,1,1])
@@ -657,8 +542,7 @@ def city_ui():
     with col2:
         filter_manu = st.text_input("Filter by Manufacturer Name (partial)")
     with col3:
-        types = sorted(df["Meter_Type"].dropna().unique().tolist()) if "Meter_Type" in df.columns else []
-        filter_type = st.selectbox("Product Type (or All)", options=["All"] + types)
+        filter_type = st.selectbox("Product Type (or All)", options=["All"] + sorted(df["Meter_Type"].dropna().unique().tolist()))
 
     view_df = df.copy()
     if view_choice != "All":
@@ -682,10 +566,7 @@ def city_ui():
         # If this is a manufacturer dispatch
         if record.get("Status", "").startswith("Pending City Approval"):
             st.subheader("Manufacturer Dispatch Actions")
-            try:
-                approved_qty = st.number_input("Approved Quantity to accept into stock", min_value=0, value=int(record.get("Dispatch_Qty") or 0))
-            except Exception:
-                approved_qty = st.number_input("Approved Quantity to accept into stock", min_value=0, value=0)
+            approved_qty = st.number_input("Approved Quantity to accept into stock", min_value=0, value=int(record.get("Dispatch_Qty") or 0))
             city_notes = st.text_area("City Notes")
             photo = st.file_uploader("Upload proof photo (optional)", type=["jpg", "png"])
             decline_reason = st.text_input("Decline reason (if declining)")
@@ -747,59 +628,27 @@ def city_ui():
             except Exception:
                 default_qty = 0
             qty = st.number_input("Approved Qty", min_value=0, value=default_qty)
-            # show available balance for this meter type
-            balance = get_balance_for_type(df, record.get("Meter_Type", "Unknown"))
-            st.info(f"Available balance for {record.get('Meter_Type')}: {balance}")
-            allow_partial = st.checkbox("Allow partial approval up to available stock if requested quantity exceeds balance")
             photo = st.file_uploader("Upload proof photo", type=["jpg", "png"])
             notes = st.text_area("Notes")
             decline_reason = st.text_input("Decline reason")
             if st.button("Approve Contractor Request"):
-                # enforce stock check
-                if qty > balance:
-                    if not allow_partial:
-                        st.error(f"Insufficient stock available ({balance}). Reduce approved qty or allow partial approval.")
-                    else:
-                        qty_to_set = min(qty, balance)
-                        if qty_to_set <= 0:
-                            st.error("No stock available to approve any quantity.")
-                        else:
-                            df.loc[df["Request_ID"] == sel_id, "Approved_Qty"] = str(qty_to_set)
-                            ppath = ""
-                            if photo:
-                                dest = PHOTO_DIR / f"{sel_id}_{photo.name}"
-                                try:
-                                    with open(dest, "wb") as f:
-                                        f.write(photo.getbuffer())
-                                    ppath = str(dest)
-                                except Exception:
-                                    st.warning("Could not save photo.")
-                            df.loc[df["Request_ID"] == sel_id, "Photo_Path"] = ppath
-                            df.loc[df["Request_ID"] == sel_id, "Status"] = "Approved / Issued"
-                            df.loc[df["Request_ID"] == sel_id, "City_Notes"] = notes
-                            df.loc[df["Request_ID"] == sel_id, "Date_Approved"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                            save_data(df)
-                            st.success(f"✅ Approved and issued (partial) — Approved Qty: {qty_to_set}.")
-                            safe_rerun()
-                else:
-                    # enough stock available
-                    df.loc[df["Request_ID"] == sel_id, "Approved_Qty"] = str(qty)
-                    ppath = ""
-                    if photo:
-                        dest = PHOTO_DIR / f"{sel_id}_{photo.name}"
-                        try:
-                            with open(dest, "wb") as f:
-                                f.write(photo.getbuffer())
-                            ppath = str(dest)
-                        except Exception:
-                            st.warning("Could not save photo.")
-                    df.loc[df["Request_ID"] == sel_id, "Photo_Path"] = ppath
-                    df.loc[df["Request_ID"] == sel_id, "Status"] = "Approved / Issued"
-                    df.loc[df["Request_ID"] == sel_id, "City_Notes"] = notes
-                    df.loc[df["Request_ID"] == sel_id, "Date_Approved"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                    save_data(df)
-                    st.success("✅ Approved and issued.")
-                    safe_rerun()
+                df.loc[df["Request_ID"] == sel_id, "Approved_Qty"] = str(qty)
+                ppath = ""
+                if photo:
+                    dest = PHOTO_DIR / f"{sel_id}_{photo.name}"
+                    try:
+                        with open(dest, "wb") as f:
+                            f.write(photo.getbuffer())
+                        ppath = str(dest)
+                    except Exception:
+                        st.warning("Could not save photo.")
+                df.loc[df["Request_ID"] == sel_id, "Photo_Path"] = ppath
+                df.loc[df["Request_ID"] == sel_id, "Status"] = "Approved / Issued"
+                df.loc[df["Request_ID"] == sel_id, "City_Notes"] = notes
+                df.loc[df["Request_ID"] == sel_id, "Date_Approved"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                save_data(df)
+                st.success("✅ Approved and issued.")
+                safe_rerun()
             if st.button("Decline Contractor Request"):
                 df.loc[df["Request_ID"] == sel_id, "Status"] = "Declined"
                 df.loc[df["Request_ID"] == sel_id, "Decline_Reason"] = decline_reason
@@ -813,27 +662,23 @@ def installer_ui():
     st.header("Meter Installer - Mark Received Stock")
     acucomm_logo = ROOT / "acucomm logo.jpg"
     if acucomm_logo.exists():
-        try:
-            st.markdown("<div style='display:flex;justify-content:center;'>", unsafe_allow_html=True)
-            st.image(str(acucomm_logo), width=250)
-            st.markdown("</div>", unsafe_allow_html=True)
-        except Exception:
-            pass
+        st.markdown("<div style='display:flex;justify-content:center;'>", unsafe_allow_html=True)
+        st.image(str(acucomm_logo), width=250)
+        st.markdown("</div>", unsafe_allow_html=True)
     st.markdown("---")
     df = load_data()
-    installer = st.session_state.auth["name"].strip().lower() if st.session_state.auth.get("name") else ""
-    approved = pd.DataFrame()
+    installer = st.session_state.auth["name"].strip().lower()
     if "Installer_Name" in df.columns and df["Installer_Name"].notna().any():
         try:
-            approved = df[df["Installer_Name"].fillna("").str.lower() == installer]
+            approved = df[df["Installer_Name"].str.lower() == installer]
         except Exception:
             approved = df.copy()
-    if approved.empty:
-        # fallback: show all approved records if installer-specific not found
-        try:
-            approved = df[df["Status"].str.contains("Approved", na=False)]
-        except Exception:
-            approved = df.copy()
+    else:
+        approved = df.copy()
+    try:
+        approved = approved[approved["Status"].str.contains("Approved", na=False)]
+    except Exception:
+        pass
     st.dataframe(approved.fillna(""), use_container_width=True)
     sel = st.selectbox("Mark as received (Request ID)", [""] + approved["Request_ID"].tolist())
     if sel and st.button("✅ Mark as Received"):
@@ -847,31 +692,20 @@ def manager_ui():
     st.header("Project Manager - Reconciliation & Export")
     df = load_data()
     st.dataframe(df.fillna(""), use_container_width=True)
-
-    st.markdown("### Current Stock Summary (computed)")
-    stock_summary = compute_stock_summary(df)
-    if stock_summary.empty:
-        st.info("No stock activity recorded yet.")
-    else:
-        st.dataframe(stock_summary.fillna("").sort_values("Balance", ascending=False), use_container_width=True)
-
     st.markdown("### 📦 Data Dump & Backup")
     dumps = sorted(DUMP_DIR.glob("*.csv"), reverse=True)
     if dumps:
         dump_names = [d.name for d in dumps]
         selected_dump = st.selectbox("Select Dump File", dump_names)
         if selected_dump:
-            try:
-                dump_df = pd.read_csv(DUMP_DIR / selected_dump)
-                st.dataframe(dump_df.fillna(""), use_container_width=True)
-                st.download_button("Download Selected Dump", dump_df.to_csv(index=False).encode(), selected_dump, "text/csv")
-            except Exception as e:
-                st.warning(f"Could not read selected dump: {e}")
+            dump_df = pd.read_csv(DUMP_DIR / selected_dump)
+            st.dataframe(dump_df.fillna(""), use_container_width=True)
+            st.download_button("Download Selected Dump", dump_df.to_csv(index=False).encode(), selected_dump, "text/csv")
     else:
         st.info("No dump files available yet.")
     st.markdown("### 🔁 Manual Backup")
     if st.button("Create & Upload Backup Now"):
-        zipfile = create_local_zip(timestamped=True)
+        zipfile = create_local_zip()
         if zipfile:
             one_local = copy_zip_to_onedrive(zipfile)
             graph_uploaded = upload_zip_to_onedrive_graph(zipfile)
