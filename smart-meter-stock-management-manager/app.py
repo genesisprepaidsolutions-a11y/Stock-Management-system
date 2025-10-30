@@ -378,6 +378,65 @@ def save_data(df):
 def generate_request_id(prefix="REQ"):
     return f"{prefix}-{datetime.now().strftime('%Y%m%d%H%M%S')}"
 
+# === NEW: Stock computation helpers ===
+
+def _to_int_safe(val):
+    try:
+        return int(float(str(val).strip()))
+    except Exception:
+        return 0
+
+def compute_stock_summary(df: pd.DataFrame) -> pd.DataFrame:
+    """Compute incoming, issued and balance per Meter_Type.
+    Incoming = sum of Dispatch_Qty for manufacturer dispatch rows that were Approved / Issued
+    Issued = sum of Approved_Qty for contractor request rows that were Approved / Issued or Received
+    """
+    if df is None or df.empty:
+        return pd.DataFrame(columns=["Meter_Type", "Total_Incoming", "Total_Issued", "Balance"]) 
+
+    # normalize Meter_Type
+    df = df.copy()
+    df["Meter_Type"] = df["Meter_Type"].fillna("Unknown")
+
+    # incoming from manufacturer dispatches (Manufacturer_Name present and Dispatch_Qty set)
+    incoming_mask = df["Manufacturer_Name"].notna() & (df["Manufacturer_Name"].astype(str).str.strip() != "") & df["Dispatch_Qty"].notna() & (df["Dispatch_Qty"].astype(str).str.strip() != "") & df["Status"].str.contains("Approved", na=False)
+    incoming = df.loc[incoming_mask, ["Meter_Type", "Dispatch_Qty"]].copy()
+    if not incoming.empty:
+        incoming["Dispatch_Qty"] = incoming["Dispatch_Qty"].apply(_to_int_safe)
+        incoming_summary = incoming.groupby("Meter_Type").sum().rename(columns={"Dispatch_Qty": "Total_Incoming"})
+    else:
+        incoming_summary = pd.DataFrame(columns=["Total_Incoming"]) 
+
+    # outgoing / issued to contractors (Manufacturer_Name empty and Approved_Qty present)
+    issued_mask = (df["Manufacturer_Name"].isna() | (df["Manufacturer_Name"].astype(str).str.strip() == "")) & df["Approved_Qty"].notna() & (df["Approved_Qty"].astype(str).str.strip() != "") & df["Status"].str.contains("Approved|Issued|Received", na=False)
+    issued = df.loc[issued_mask, ["Meter_Type", "Approved_Qty"]].copy()
+    if not issued.empty:
+        issued["Approved_Qty"] = issued["Approved_Qty"].apply(_to_int_safe)
+        issued_summary = issued.groupby("Meter_Type").sum().rename(columns={"Approved_Qty": "Total_Issued"})
+    else:
+        issued_summary = pd.DataFrame(columns=["Total_Issued"]) 
+
+    # combine
+    all_types = sorted(set(df["Meter_Type"].unique().tolist() + incoming_summary.index.tolist() + issued_summary.index.tolist()))
+    rows = []
+    for mt in all_types:
+        tin = int(incoming_summary.loc[mt, "Total_Incoming"]) if (mt in incoming_summary.index and not incoming_summary.empty) else 0
+        tout = int(issued_summary.loc[mt, "Total_Issued"]) if (mt in issued_summary.index and not issued_summary.empty) else 0
+        rows.append({"Meter_Type": mt, "Total_Incoming": tin, "Total_Issued": tout, "Balance": tin - tout})
+    return pd.DataFrame(rows)
+
+def get_balance_for_type(df: pd.DataFrame, meter_type: str) -> int:
+    summary = compute_stock_summary(df)
+    if summary.empty:
+        return 0
+    row = summary[summary["Meter_Type"] == meter_type]
+    if row.empty:
+        return 0
+    try:
+        return int(row.iloc[0]["Balance"])
+    except Exception:
+        return 0
+
 # ====================================================
 # === LOGIN UI ===
 # ====================================================
@@ -533,11 +592,19 @@ def city_ui():
         st.info("No records in the system.")
         return
 
+    # --- show stock summary ---
+    st.markdown("### Current Stock Summary (computed from approved dispatches / issued requests)")
+    stock_summary = compute_stock_summary(df)
+    if stock_summary.empty:
+        st.info("No stock activity recorded yet.")
+    else:
+        st.dataframe(stock_summary.fillna("").sort_values("Balance", ascending=False), use_container_width=True)
+
     # Show filters
     st.markdown("### Filters")
     col1, col2, col3 = st.columns([1,1,1])
     with col1:
-        view_choice = st.selectbox("Show records", ["All", "Pending Verification", "Pending City Approval (Manufacturer Delivery)", "Approved / Issued", "Declined", "Received"])
+        view_choice = st.selectbox("Show records", ["All", "Pending Verification", "Pending City Approval (Manufacturer Delivery)", "Approved / Issued", "Declined", "Received"]) 
     with col2:
         filter_manu = st.text_input("Filter by Manufacturer Name (partial)")
     with col3:
@@ -627,27 +694,59 @@ def city_ui():
             except Exception:
                 default_qty = 0
             qty = st.number_input("Approved Qty", min_value=0, value=default_qty)
+            # show available balance for this meter type
+            balance = get_balance_for_type(df, record.get("Meter_Type", "Unknown"))
+            st.info(f"Available balance for {record.get('Meter_Type')}: {balance}")
+            allow_partial = st.checkbox("Allow partial approval up to available stock if requested quantity exceeds balance")
             photo = st.file_uploader("Upload proof photo", type=["jpg", "png"])
             notes = st.text_area("Notes")
             decline_reason = st.text_input("Decline reason")
             if st.button("Approve Contractor Request"):
-                df.loc[df["Request_ID"] == sel_id, "Approved_Qty"] = str(qty)
-                ppath = ""
-                if photo:
-                    dest = PHOTO_DIR / f"{sel_id}_{photo.name}"
-                    try:
-                        with open(dest, "wb") as f:
-                            f.write(photo.getbuffer())
-                        ppath = str(dest)
-                    except Exception:
-                        st.warning("Could not save photo.")
-                df.loc[df["Request_ID"] == sel_id, "Photo_Path"] = ppath
-                df.loc[df["Request_ID"] == sel_id, "Status"] = "Approved / Issued"
-                df.loc[df["Request_ID"] == sel_id, "City_Notes"] = notes
-                df.loc[df["Request_ID"] == sel_id, "Date_Approved"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                save_data(df)
-                st.success("✅ Approved and issued.")
-                safe_rerun()
+                # enforce stock check
+                if qty > balance:
+                    if not allow_partial:
+                        st.error(f"Insufficient stock available ({balance}). Reduce approved qty or allow partial approval.")
+                    else:
+                        qty_to_set = min(qty, balance)
+                        if qty_to_set <= 0:
+                            st.error("No stock available to approve any quantity.")
+                        else:
+                            df.loc[df["Request_ID"] == sel_id, "Approved_Qty"] = str(qty_to_set)
+                            ppath = ""
+                            if photo:
+                                dest = PHOTO_DIR / f"{sel_id}_{photo.name}"
+                                try:
+                                    with open(dest, "wb") as f:
+                                        f.write(photo.getbuffer())
+                                    ppath = str(dest)
+                                except Exception:
+                                    st.warning("Could not save photo.")
+                            df.loc[df["Request_ID"] == sel_id, "Photo_Path"] = ppath
+                            df.loc[df["Request_ID"] == sel_id, "Status"] = "Approved / Issued"
+                            df.loc[df["Request_ID"] == sel_id, "City_Notes"] = notes
+                            df.loc[df["Request_ID"] == sel_id, "Date_Approved"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                            save_data(df)
+                            st.success(f"✅ Approved and issued (partial) — Approved Qty: {qty_to_set}.")
+                            safe_rerun()
+                else:
+                    # enough stock available
+                    df.loc[df["Request_ID"] == sel_id, "Approved_Qty"] = str(qty)
+                    ppath = ""
+                    if photo:
+                        dest = PHOTO_DIR / f"{sel_id}_{photo.name}"
+                        try:
+                            with open(dest, "wb") as f:
+                                f.write(photo.getbuffer())
+                            ppath = str(dest)
+                        except Exception:
+                            st.warning("Could not save photo.")
+                    df.loc[df["Request_ID"] == sel_id, "Photo_Path"] = ppath
+                    df.loc[df["Request_ID"] == sel_id, "Status"] = "Approved / Issued"
+                    df.loc[df["Request_ID"] == sel_id, "City_Notes"] = notes
+                    df.loc[df["Request_ID"] == sel_id, "Date_Approved"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                    save_data(df)
+                    st.success("✅ Approved and issued.")
+                    safe_rerun()
             if st.button("Decline Contractor Request"):
                 df.loc[df["Request_ID"] == sel_id, "Status"] = "Declined"
                 df.loc[df["Request_ID"] == sel_id, "Decline_Reason"] = decline_reason
@@ -691,6 +790,14 @@ def manager_ui():
     st.header("Project Manager - Reconciliation & Export")
     df = load_data()
     st.dataframe(df.fillna(""), use_container_width=True)
+
+    st.markdown("### Current Stock Summary (computed)")
+    stock_summary = compute_stock_summary(df)
+    if stock_summary.empty:
+        st.info("No stock activity recorded yet.")
+    else:
+        st.dataframe(stock_summary.fillna("").sort_values("Balance", ascending=False), use_container_width=True)
+
     st.markdown("### 📦 Data Dump & Backup")
     dumps = sorted(DUMP_DIR.glob("*.csv"), reverse=True)
     if dumps:
@@ -772,4 +879,3 @@ st.markdown(f"""
         © {datetime.now().year} eThekwini Municipality-WS7761 | Smart Meter Stock Management System
     </div>
 """, unsafe_allow_html=True)
-
