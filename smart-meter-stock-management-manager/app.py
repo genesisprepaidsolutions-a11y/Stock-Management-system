@@ -564,7 +564,6 @@ def city_ui():
         st.write("Record details:")
        record_df = pd.DataFrame(list(record.items()), columns=["Field", "Value"])
 st.table(record_df)
-
         # If this is a manufacturer dispatch
         if record.get("Status", "").startswith("Pending City Approval"):
             st.subheader("Manufacturer Dispatch Actions")
