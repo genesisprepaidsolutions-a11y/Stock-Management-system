@@ -1,4 +1,4 @@
-# app.py
+# app_fixed_report_details.py
 import streamlit as st
 import pandas as pd
 from datetime import datetime
@@ -318,8 +318,10 @@ def hash_password(p): return hashlib.sha256(p.encode()).hexdigest()
 
 raw_users = {
     "Deezlo": {"name": "Deezlo", "password": "Deezlo123", "role": "contractor", "email": CONTRACTOR_EMAIL},
+    "Nimba": {"name": "Nimba", "password": "Nimba123", "role": "contractor", "email": CONTRACTOR_EMAIL},
     "ethekwini": {"name": "ethekwini", "password": "ethekwini123", "role": "city", "email": ETHEKWINI_EMAIL},
     "installer1": {"name": "installer1", "password": "installer123", "role": "installer", "email": INSTALLER_EMAIL},
+    "installer2": {"name": "installer2", "password": "installer123", "role": "installer", "email": INSTALLER_EMAIL},
     "Reece": {"name": "Reece", "password": "Reece123!", "role": "manager", "email": MANAGER_EMAIL},
     "manufacturer1": {"name": "manufacturer1", "password": "manufacturer123", "role": "manufacturer", "email": MANUFACTURER_EMAIL},
 }
@@ -540,7 +542,6 @@ def manufacturer_ui():
                     pass
 
 # ====================================================
-
 # === CITY UI (UPDATED REPORT DETAILS) ===
 # ====================================================
 def _safe(val):
