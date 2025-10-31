@@ -464,69 +464,83 @@ def manufacturer_ui():
     manu_name = st.session_state.auth["name"]
     st.text_input("Manufacturer Name", value=manu_name, key="manu_name_field")
     st.markdown("---")
-    with st.form("manu_dispatch_form", clear_on_submit=False):
-        batch_num = st.text_input("Batch Number", value="")
-        meter_model = st.selectbox("Product / Meter Model", ["DN15 Meter", "CIU Keypad", "Other"])
-        dispatch_qty = st.number_input("Dispatch Quantity", min_value=0, value=0, step=1)
-        dispatch_date = st.date_input("Dispatch Date", value=datetime.now().date())
-        dispatch_note = st.text_area("Delivery Note")
-        dispatch_docs = st.file_uploader("Attach Delivery Document (optional)", type=["pdf", "jpg", "png"])
-        submitted = st.form_submit_button("Submit Dispatch to City")
-        if submitted:
-            if not batch_num.strip():
-                st.warning("Please enter a batch number.")
-            elif dispatch_qty <= 0:
-                st.warning("Quantity must be at least 1.")
-            else:
-                df = load_data()
-                rid = generate_request_id(prefix="MANU")
-                doc_path = ""
-                if dispatch_docs:
-                    filename = f"{rid}_{dispatch_docs.name}"
-                    dest = DATA_DIR / filename
-                    try:
-                        with open(dest, "wb") as f:
-                            f.write(dispatch_docs.getbuffer())
-                        doc_path = str(dest)
-                    except Exception as e:
-                        st.warning(f"Could not save attached document: {e}")
-                new = {
-                    "Date_Requested": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                    "Request_ID": rid,
-                    "Contractor_Name": "",  # not applicable
-                    "Installer_Name": "",
-                    "Meter_Type": meter_model,
-                    "Requested_Qty": "",  # not used for manufacturer dispatch
-                    "Approved_Qty": "",
-                    "Photo_Path": "",
-                    "Status": "Pending City Approval (Manufacturer Delivery)",
-                    "Contractor_Notes": "",
-                    "City_Notes": "",
-                    "Decline_Reason": "",
-                    "Date_Approved": "",
-                    "Date_Received": "",
-                    "Manufacturer_Name": manu_name,
-                    "Batch_Number": batch_num,
-                    "Dispatch_Qty": str(dispatch_qty),
-                    "Dispatch_Date": dispatch_date.strftime("%Y-%m-%d"),
-                    "Dispatch_Note": dispatch_note,
-                    "Dispatch_Docs": doc_path
-                }
-                df = pd.concat([df, pd.DataFrame([new])], ignore_index=True)
+
+    # New: allow manufacturer to input quantities per product like contractor
+    st.subheader("Select Products & Quantities to Dispatch")
+    col1, col2 = st.columns(2)
+    manu_meter_qty = col1.number_input("DN15 Meter Dispatch Quantity", min_value=0, value=0, step=1)
+    manu_keypad_qty = col2.number_input("CIU Keypad Dispatch Quantity", min_value=0, value=0, step=1)
+
+    batch_num = st.text_input("Batch Number", value="")
+    dispatch_date = st.date_input("Dispatch Date", value=datetime.now().date())
+    dispatch_note = st.text_area("Delivery Note")
+    dispatch_docs = st.file_uploader("Attach Delivery Document (optional)", type=["pdf", "jpg", "png"])
+
+    if st.button("Submit Dispatch to City"):
+        if not batch_num.strip():
+            st.warning("Please enter a batch number.")
+        elif manu_meter_qty == 0 and manu_keypad_qty == 0:
+            st.warning("Please enter at least one dispatch quantity for a product.")
+        else:
+            df = load_data()
+            base_rid = generate_request_id(prefix="MANU")
+            entries = []
+            doc_path = ""
+            # Save attached doc once and reuse path
+            if dispatch_docs:
+                filename = f"{base_rid}_{dispatch_docs.name}"
+                dest = DATA_DIR / filename
+                try:
+                    with open(dest, "wb") as f:
+                        f.write(dispatch_docs.getbuffer())
+                    doc_path = str(dest)
+                except Exception as e:
+                    st.warning(f"Could not save attached document: {e}")
+
+            for item_type, qty in [("DN15 Meter", manu_meter_qty), ("CIU Keypad", manu_keypad_qty)]:
+                if qty > 0:
+                    rid = f"{base_rid}-{item_type.replace(' ', '_')[:10]}"
+                    new = {
+                        "Date_Requested": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                        "Request_ID": rid,
+                        "Contractor_Name": "",  # not applicable
+                        "Installer_Name": "",
+                        "Meter_Type": item_type,
+                        "Requested_Qty": "",  # not used for manufacturer dispatch
+                        "Approved_Qty": "",
+                        "Photo_Path": "",
+                        "Status": "Pending City Approval (Manufacturer Delivery)",
+                        "Contractor_Notes": "",
+                        "City_Notes": "",
+                        "Decline_Reason": "",
+                        "Date_Approved": "",
+                        "Date_Received": "",
+                        "Manufacturer_Name": manu_name,
+                        "Batch_Number": batch_num,
+                        "Dispatch_Qty": str(qty),
+                        "Dispatch_Date": dispatch_date.strftime("%Y-%m-%d"),
+                        "Dispatch_Note": dispatch_note,
+                        "Dispatch_Docs": doc_path
+                    }
+                    entries.append(new)
+
+            if entries:
+                df = pd.concat([df, pd.DataFrame(entries)], ignore_index=True)
                 save_data(df)
-                st.success(f"✅ Dispatch submitted to City as {rid}")
+                st.success(f"✅ Dispatch submitted to City as base ID {base_rid} ({len(entries)} item rows created)")
                 # optional: email notify city
                 try:
                     if ETHEKWINI_EMAIL:
                         send_email(
-                            subject=f"Manufacturer Dispatch Pending Approval: {rid}",
-                            html_body=f"<p>Manufacturer <b>{manu_name}</b> submitted dispatch <b>{rid}</b> (Batch {batch_num}) for approval.</p>",
+                            subject=f"Manufacturer Dispatch Pending Approval: {base_rid}",
+                            html_body=f"<p>Manufacturer <b>{manu_name}</b> submitted dispatch <b>{base_rid}</b> (Batch {batch_num}).</p>",
                             to_emails=ETHEKWINI_EMAIL
                         )
                 except Exception:
                     pass
 
 # ====================================================
+
 # === CITY UI (UPDATED REPORT DETAILS) ===
 # ====================================================
 def _safe(val):
@@ -852,4 +866,3 @@ st.markdown(f"""
         © {datetime.now().year} eThekwini Municipality-WS7761 | Smart Meter Stock Management System
     </div>
 """, unsafe_allow_html=True)
-
