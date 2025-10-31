@@ -318,6 +318,7 @@ def hash_password(p): return hashlib.sha256(p.encode()).hexdigest()
 
 raw_users = {
     "Deezlo": {"name": "Deezlo", "password": "Deezlo123", "role": "contractor", "email": CONTRACTOR_EMAIL},
+    "Nimba": {"name": "Nimba", "password": "Nimba123", "role": "contractor", "email": CONTRACTOR2_EMAIL},
     "ethekwini": {"name": "ethekwini", "password": "ethekwini123", "role": "city", "email": ETHEKWINI_EMAIL},
     "installer1": {"name": "installer1", "password": "installer123", "role": "installer", "email": INSTALLER_EMAIL},
     "Reece": {"name": "Reece", "password": "Reece123!", "role": "manager", "email": MANAGER_EMAIL},
