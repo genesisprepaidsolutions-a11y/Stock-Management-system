@@ -1,4 +1,3 @@
-
 # app.py
 import streamlit as st
 import pandas as pd
@@ -527,6 +526,28 @@ def manufacturer_ui():
                 except Exception:
                     pass
 
+# ====================================================
+# === CITY UI (UPDATED REPORT DETAILS) ===
+# ====================================================
+def _safe(val):
+    return "" if val is None or (isinstance(val, float) and pd.isna(val)) else str(val)
+
+
+def _display_file_link(path_str, label="Download"):
+    try:
+        p = Path(path_str)
+        if p.exists():
+            with open(p, "rb") as f:
+                data = f.read()
+            b64 = base64.b64encode(data).decode()
+            href = f"data:application/octet-stream;base64,{b64}"
+            st.markdown(f"[{label}]({href})")
+            return True
+    except Exception:
+        pass
+    return False
+
+
 def city_ui():
     st.header("eThekwini Municipality - Verify Requests & Manufacturer Deliveries")
     df = load_data()
@@ -561,14 +582,69 @@ def city_ui():
     sel_id = st.selectbox("Select Request/Dispatch ID to act on", [""] + view_df["Request_ID"].tolist())
     if sel_id:
         record = df[df["Request_ID"] == sel_id].iloc[0].to_dict()
-        st.write("Record details:")
-        st.write(record)
+
+        # --- Improved Report Details Section ---
+        st.markdown("**Record details:**")
+        # Top row: ID, Status, Requested/Approved Qty
+        rcol1, rcol2, rcol3 = st.columns([2,2,2])
+        rcol1.markdown(f"**Request ID**\n{_safe(record.get('Request_ID'))}")
+        rcol2.markdown(f"**Status**\n{_safe(record.get('Status'))}")
+        rcol3.markdown(f"**Meter Type**\n{_safe(record.get('Meter_Type'))}")
+
+        # Second row: Dates
+        dcol1, dcol2, dcol3 = st.columns([2,2,2])
+        dcol1.markdown(f"**Date Requested**\n{_safe(record.get('Date_Requested'))}")
+        dcol2.markdown(f"**Date Approved**\n{_safe(record.get('Date_Approved'))}")
+        dcol3.markdown(f"**Date Received**\n{_safe(record.get('Date_Received'))}")
+
+        # Third row: Parties and quantities
+        p1, p2, p3 = st.columns([2,2,2])
+        p1.markdown(f"**Contractor**\n{_safe(record.get('Contractor_Name'))}")
+        p2.markdown(f"**Installer**\n{_safe(record.get('Installer_Name'))}")
+        p3.markdown(f"**Requested / Approved**\n{_safe(record.get('Requested_Qty'))} / {_safe(record.get('Approved_Qty'))}")
+
+        # Manufacturer & batch info
+        m1, m2, m3 = st.columns([2,2,2])
+        m1.markdown(f"**Manufacturer**\n{_safe(record.get('Manufacturer_Name'))}")
+        m2.markdown(f"**Batch #**\n{_safe(record.get('Batch_Number'))}")
+        m3.markdown(f"**Dispatch Qty / Date**\n{_safe(record.get('Dispatch_Qty'))} / {_safe(record.get('Dispatch_Date'))}")
+
+        # Notes and decline reason full width
+        st.markdown("**Notes (City / Contractor / Dispatch)**")
+        st.write(f"City Notes: {_safe(record.get('City_Notes'))}")
+        st.write(f"Contractor Notes: {_safe(record.get('Contractor_Notes'))}")
+        st.write(f"Dispatch Note: {_safe(record.get('Dispatch_Note'))}")
+        if record.get('Decline_Reason'):
+            st.warning(f"Decline Reason: {_safe(record.get('Decline_Reason'))}")
+
+        # Show photo preview if available
+        photo_path = _safe(record.get('Photo_Path'))
+        if photo_path:
+            try:
+                p = Path(photo_path)
+                if p.exists():
+                    st.markdown("**Attached Photo**")
+                    st.image(str(p), use_column_width=False, width=300)
+                else:
+                    st.info("No attached photo found at saved path.")
+            except Exception:
+                st.info("Could not load attached photo.")
+
+        # Show dispatch docs download link if available
+        doc_path = _safe(record.get('Dispatch_Docs'))
+        if doc_path:
+            st.markdown("**Attached Documents**")
+            ok = _display_file_link(doc_path, label="Download dispatch document")
+            if not ok:
+                st.info("Attached document path is set but file not found.")
+
+        st.markdown("---")
         # If this is a manufacturer dispatch
         if record.get("Status", "").startswith("Pending City Approval"):
             st.subheader("Manufacturer Dispatch Actions")
             approved_qty = st.number_input("Approved Quantity to accept into stock", min_value=0, value=int(record.get("Dispatch_Qty") or 0))
             city_notes = st.text_area("City Notes")
-            photo = st.file_uploader("Upload proof photo (optional)", type=["jpg", "png"])
+            photo = st.file_uploader("Upload proof photo (optional)", type=["jpg", "png"] )
             decline_reason = st.text_input("Decline reason (if declining)")
             approve_btn, decline_btn = st.columns(2)
             if approve_btn.button("Approve Manufacturer Dispatch"):
@@ -628,7 +704,7 @@ def city_ui():
             except Exception:
                 default_qty = 0
             qty = st.number_input("Approved Qty", min_value=0, value=default_qty)
-            photo = st.file_uploader("Upload proof photo", type=["jpg", "png"])
+            photo = st.file_uploader("Upload proof photo", type=["jpg", "png"]) 
             notes = st.text_area("Notes")
             decline_reason = st.text_input("Decline reason")
             if st.button("Approve Contractor Request"):
@@ -658,6 +734,9 @@ def city_ui():
         else:
             st.info("Selected record is not actionable from this panel. Use Manager or Installer panels for other operations.")
 
+# ====================================================
+# === INSTALLER UI ===
+# ====================================================
 def installer_ui():
     st.header("Meter Installer - Mark Received Stock")
     acucomm_logo = ROOT / "acucomm logo.jpg"
@@ -773,3 +852,4 @@ st.markdown(f"""
         © {datetime.now().year} eThekwini Municipality-WS7761 | Smart Meter Stock Management System
     </div>
 """, unsafe_allow_html=True)
+
