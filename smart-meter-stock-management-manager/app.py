@@ -260,7 +260,7 @@ except Exception:
 # ====================================================
 # === EMAIL CONFIG ===
 # ====================================================
-SMTP_SERVER = "smtp.acucommholdings.co.za"
+SMTP_SERVER = "mail.onegrid.co.za"
 SMTP_PORT = 465
 
 SENDER_EMAIL = get_secret("EXCHANGE_EMAIL")
