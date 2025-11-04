@@ -272,23 +272,32 @@ MANAGER_EMAIL = get_secret("MANAGER_EMAIL")
 MANUFACTURER_EMAIL = get_secret("MANUFACTURER_EMAIL")
 
 def send_email(subject, html_body, to_emails):
+    """
+    SSL-safe email send using smtplib.SMTP_SSL.
+    to_emails can be a single email string or list of strings.
+    Returns True on success, False on failure.
+    """
     if not SENDER_EMAIL or not SENDER_PASSWORD:
-        print("Email credentials not configured.")
+        # do not leak secrets to UI; use st.error in caller if desired
         return False
-    recipients = [to_emails] if isinstance(to_emails, str) else to_emails
+    recipients = [to_emails] if isinstance(to_emails, str) else list(to_emails)
     try:
         msg = MIMEMultipart()
         msg["From"] = SENDER_EMAIL
         msg["To"] = ", ".join(recipients)
         msg["Subject"] = subject
         msg.attach(MIMEText(html_body, "html"))
-        with smtplib.SMTP(SMTP_SERVER, SMTP_PORT) as server:
-            server.starttls()
+        # Use SMTP_SSL for implicit TLS (secure)
+        with smtplib.SMTP_SSL(SMTP_SERVER, SMTP_PORT, timeout=30) as server:
             server.login(SENDER_EMAIL, SENDER_PASSWORD)
             server.sendmail(SENDER_EMAIL, recipients, msg.as_string())
         return True
     except Exception as e:
-        print(f"Email send error: {e}")
+        # Keep logging simple; in production, log to file/monitoring
+        try:
+            print(f"Email send error (SSL): {e}")
+        except Exception:
+            pass
         return False
 
 # ====================================================
@@ -786,6 +795,26 @@ def manager_ui():
     st.header("Project Manager - Reconciliation & Export")
     df = load_data()
     st.dataframe(df.fillna(""), use_container_width=True)
+
+    # === Email Test UI (Admin / Manager only) ===
+    # Show this panel only to manager/admin roles
+    current_role = st.session_state.auth.get("role", "")
+    if current_role in ("manager", "admin"):
+        st.markdown("### ✉️ Email Testing (Manager / Admin only)")
+        with st.expander("Send Test Email"):
+            default_recipient = MANAGER_EMAIL or (CREDENTIALS.get(st.session_state.auth.get("username"), {}).get("email") if st.session_state.auth.get("username") else "")
+            test_to = st.text_input("Recipient email", value=default_recipient)
+            test_subject = st.text_input("Subject", value=f"Test Email from Smart Meter Stock Management ({datetime.now().strftime('%Y-%m-%d %H:%M:%S')})")
+            test_body = st.text_area("HTML Body", value="<p>This is a test email sent from the Smart Meter Stock Management application. If you received this, email sending is configured correctly.</p>")
+            if st.button("Send Test Email"):
+                if not test_to:
+                    st.error("Please provide a recipient email.")
+                else:
+                    ok = send_email(subject=test_subject, html_body=test_body, to_emails=test_to)
+                    if ok:
+                        st.success(f"Test email sent to {test_to}")
+                    else:
+                        st.error("Failed to send test email. Check SMTP settings and credentials.")
 
     st.markdown("### 🔎 Record Management (Edit / Delete)")
     if df.empty:
