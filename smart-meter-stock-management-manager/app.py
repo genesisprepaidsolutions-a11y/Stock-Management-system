@@ -263,7 +263,8 @@ except Exception:
 SMTP_SERVER = "mail.onegrid.co.za"
 SMTP_PORT = 465
 
-SENDER_EMAIL = get_secret("EXCHANGE_EMAIL")
+# Use secret if set; otherwise fall back to the admin address provided.
+SENDER_EMAIL = get_secret("EXCHANGE_EMAIL") or "admin@acucommholdings.co.za"
 SENDER_PASSWORD = get_secret("EXCHANGE_PASSWORD")
 CONTRACTOR_EMAIL = get_secret("CONTRACTOR_EMAIL")
 ETHEKWINI_EMAIL = get_secret("ETHEKWINI_EMAIL")
@@ -271,31 +272,58 @@ INSTALLER_EMAIL = get_secret("INSTALLER_EMAIL")
 MANAGER_EMAIL = get_secret("MANAGER_EMAIL")
 MANUFACTURER_EMAIL = get_secret("MANUFACTURER_EMAIL")
 
+# Hold last detailed error for UI feedback (keeps backward compatibility)
+LAST_EMAIL_ERROR = None
+
 def send_email(subject, html_body, to_emails):
     """
-    SSL-safe email send using smtplib.SMTP_SSL.
-    to_emails can be a single email string or list of strings.
-    Returns True on success, False on failure.
+    Robust email sender with failover:
+      - Try implicit SSL (SMTP_SSL) on port 465 first.
+      - If that fails, try STARTTLS on port 587.
+    Returns True on success, False on failure. On failure, LAST_EMAIL_ERROR will contain details.
     """
+    global LAST_EMAIL_ERROR
+    LAST_EMAIL_ERROR = None
+
     if not SENDER_EMAIL or not SENDER_PASSWORD:
-        # do not leak secrets to UI; use st.error in caller if desired
+        LAST_EMAIL_ERROR = "Sender credentials not configured (SENDER_EMAIL or SENDER_PASSWORD missing)."
         return False
+
     recipients = [to_emails] if isinstance(to_emails, str) else list(to_emails)
+    msg = MIMEMultipart()
+    msg["From"] = SENDER_EMAIL
+    msg["To"] = ", ".join(recipients)
+    msg["Subject"] = subject
+    msg.attach(MIMEText(html_body, "html"))
+
+    # 1) Try SMTP_SSL (implicit TLS) on port 465
     try:
-        msg = MIMEMultipart()
-        msg["From"] = SENDER_EMAIL
-        msg["To"] = ", ".join(recipients)
-        msg["Subject"] = subject
-        msg.attach(MIMEText(html_body, "html"))
-        # Use SMTP_SSL for implicit TLS (secure)
-        with smtplib.SMTP_SSL(SMTP_SERVER, SMTP_PORT, timeout=30) as server:
+        with smtplib.SMTP_SSL(SMTP_SERVER, 465, timeout=30) as server:
             server.login(SENDER_EMAIL, SENDER_PASSWORD)
             server.sendmail(SENDER_EMAIL, recipients, msg.as_string())
+        LAST_EMAIL_ERROR = None
         return True
-    except Exception as e:
-        # Keep logging simple; in production, log to file/monitoring
+    except Exception as e_ssl:
+        # Save the SSL error and attempt STARTTLS fallback
+        LAST_EMAIL_ERROR = f"SSL send failed: {e_ssl}"
+        # fall through to STARTTLS attempt
+
+    # 2) Try STARTTLS on port 587 as fallback
+    try:
+        with smtplib.SMTP(SMTP_SERVER, 587, timeout=30) as server:
+            server.ehlo()
+            server.starttls()
+            server.ehlo()
+            server.login(SENDER_EMAIL, SENDER_PASSWORD)
+            server.sendmail(SENDER_EMAIL, recipients, msg.as_string())
+        LAST_EMAIL_ERROR = None
+        return True
+    except Exception as e_tls:
+        # Combine errors for easier troubleshooting
+        LAST_EMAIL_ERROR = (LAST_EMAIL_ERROR or "") + f" | STARTTLS failed: {e_tls}"
         try:
-            print(f"Email send error (SSL): {e}")
+            # Also print to stdout for logs if possible
+            print("Email send errors:", LAST_EMAIL_ERROR)
         except Exception:
             pass
         return False
@@ -333,6 +361,7 @@ raw_users = {
     "installer2": {"name": "installer2", "password": "installer123", "role": "installer", "email": INSTALLER_EMAIL},
     "Reece": {"name": "Reece", "password": "Reece123!", "role": "manager", "email": MANAGER_EMAIL},
     "manufacturer1": {"name": "manufacturer1", "password": "manufacturer123", "role": "manufacturer", "email": MANUFACTURER_EMAIL},
+    # Add admin user mapping here if you want an 'admin' role user, else the admin check uses the email check below
 }
 
 CREDENTIALS = {u: {"name": v["name"], "password_hash": hash_password(v["password"]), "role": v["role"], "email": v["email"]} for u, v in raw_users.items()}
@@ -797,13 +826,16 @@ def manager_ui():
     st.dataframe(df.fillna(""), use_container_width=True)
 
     # === Email Test UI (Admin / Manager only) ===
-    # Show this panel only to manager/admin roles
+    # Show this panel only to manager/admin roles OR the admin email owner
     current_role = st.session_state.auth.get("role", "")
-    if current_role in ("manager", "admin"):
-        st.markdown("### ✉️ Email Testing (Manager / Admin only)")
+    logged_in_user = st.session_state.auth.get("username")
+    logged_in_email = CREDENTIALS.get(logged_in_user, {}).get("email") if logged_in_user else None
+    is_admin_user = (current_role in ("manager", "admin")) or (logged_in_email == "admin@acucommholdings.co.za")
+
+    if is_admin_user:
+        st.markdown("### ✉️ Email Testing (Admin/Manager only)")
         with st.expander("Send Test Email"):
-            default_recipient = MANAGER_EMAIL or (CREDENTIALS.get(st.session_state.auth.get("username"), {}).get("email") if st.session_state.auth.get("username") else "")
-            test_to = st.text_input("Recipient email", value=default_recipient)
+            test_to = st.text_input("Recipient email (type any address)")
             test_subject = st.text_input("Subject", value=f"Test Email from Smart Meter Stock Management ({datetime.now().strftime('%Y-%m-%d %H:%M:%S')})")
             test_body = st.text_area("HTML Body", value="<p>This is a test email sent from the Smart Meter Stock Management application. If you received this, email sending is configured correctly.</p>")
             if st.button("Send Test Email"):
@@ -814,7 +846,7 @@ def manager_ui():
                     if ok:
                         st.success(f"Test email sent to {test_to}")
                     else:
-                        st.error("Failed to send test email. Check SMTP settings and credentials.")
+                        st.error(f"Failed to send test email. Reason: {LAST_EMAIL_ERROR}")
 
     st.markdown("### 🔎 Record Management (Edit / Delete)")
     if df.empty:
