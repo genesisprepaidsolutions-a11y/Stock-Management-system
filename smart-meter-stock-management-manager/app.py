@@ -1,4 +1,5 @@
-# app_fixed_report_details_no_backup.py
+# app_fixed_report_details.py
+
 import streamlit as st
 import pandas as pd
 from datetime import datetime
@@ -9,277 +10,195 @@ import smtplib
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 import base64
-from PIL import Image
+import shutil
+import glob
+import requests  # optional for connectivity checks
 
 # ====================================================
-# === THEME & BRAND COLOURS ===
+# === APP CONFIGURATION ===
 # ====================================================
-PRIMARY_BLUE = "#003366"
-SECONDARY_BLUE = "#0072BC"
-LIGHT_BLUE = "#E6F2FA"
-WHITE = "#FFFFFF"
-GREY = "#F5F7FA"
+st.set_page_config(page_title="Fixed Report Details", layout="wide")
 
 # ====================================================
-# === PAGE CONFIG ===
+# === CONSTANTS & PATHS ===
 # ====================================================
-ROOT = Path(__file__).parent
-favicon_path = ROOT / "favicon.jpg"
-if favicon_path.exists():
-    favicon_image = Image.open(favicon_path)
-else:
-    favicon_image = None
-
-st.set_page_config(
-    page_title="Acucomm Stock Management",
-    page_icon=favicon_image,
-    layout="centered"
-)
+DATA_DIR = Path("data")
+DATA_DIR.mkdir(exist_ok=True)
+REPORT_FILE = DATA_DIR / "report_data.csv"
 
 # ====================================================
-# === CUSTOM CSS FOR THEME ===
+# === UTILITY FUNCTIONS ===
 # ====================================================
-st.markdown(f"""
-    <style>
-        .stApp {{
-            background-color: {WHITE};
-            color: {PRIMARY_BLUE};
-            font-family: 'Helvetica Neue', sans-serif;
-        }}
-        h1, h2, h3, h4 {{
-            color: {PRIMARY_BLUE};
-        }}
-        .stButton>button {{
-            background-color: {SECONDARY_BLUE};
-            color: {WHITE};
-            border: none;
-            border-radius: 8px;
-            padding: 0.6rem 1rem;
-            font-size: 1rem;
-            transition: 0.3s;
-        }}
-        .stButton>button:hover {{
-            background-color: {PRIMARY_BLUE};
-            color: {WHITE};
-        }}
-        [data-testid="stSidebar"] {{
-            background: linear-gradient(180deg, {PRIMARY_BLUE}, {SECONDARY_BLUE});
-            color: {WHITE};
-        }}
-        [data-testid="stSidebar"] h2, [data-testid="stSidebar"] h3, [data-testid="stSidebar"] h4, [data-testid="stSidebar"] p, [data-testid="stSidebar"] span {{
-            color: {WHITE};
-        }}
-        [data-testid="stSidebar"] a {{
-            color: {WHITE} !important;
-        }}
-        .stDataFrame tbody td {{
-            color: {PRIMARY_BLUE};
-        }}
-        .stDataFrame thead th {{
-            background-color: {SECONDARY_BLUE};
-            color: {WHITE};
-        }}
-    </style>
-""", unsafe_allow_html=True)
 
-# ====================================================
-# === DIRECTORY SETUP ===
-# ====================================================
-DATA_DIR = ROOT / "data"
-PHOTO_DIR = ROOT / "photos"
-ISSUED_PHOTOS_DIR = PHOTO_DIR / "issued"
-REPORT_DIR = ROOT / "reports"
-DUMP_DIR = DATA_DIR / "dumps"
+def hash_password(password: str) -> str:
+    """Return SHA256 hash of password."""
+    return hashlib.sha256(password.encode()).hexdigest()
 
-for d in [DATA_DIR, PHOTO_DIR, ISSUED_PHOTOS_DIR, REPORT_DIR, DUMP_DIR]:
-    d.mkdir(parents=True, exist_ok=True)
+def verify_login(username: str, password: str) -> bool:
+    """Validate user credentials."""
+    user_db = {
+        "admin": hash_password("admin123"),
+        "manager": hash_password("manager123"),
+        "viewer": hash_password("viewer123"),
+    }
+    return username in user_db and user_db[username] == hash_password(password)
 
-DATA_FILE = DATA_DIR / "stock_requests.csv"
-
-# ====================================================
-# === EMAIL CONFIG ===
-# ====================================================
-def get_secret(key):
-    try:
-        return st.secrets[key]
-    except Exception:
-        return os.getenv(key)
-
-SMTP_SERVER = "smtp.office365.com"
-SMTP_PORT = 587
-
-SENDER_EMAIL = get_secret("EXCHANGE_EMAIL")
-SENDER_PASSWORD = get_secret("EXCHANGE_PASSWORD")
-CONTRACTOR_EMAIL = get_secret("CONTRACTOR_EMAIL")
-ETHEKWINI_EMAIL = get_secret("ETHEKWINI_EMAIL")
-INSTALLER_EMAIL = get_secret("INSTALLER_EMAIL")
-MANAGER_EMAIL = get_secret("MANAGER_EMAIL")
-MANUFACTURER_EMAIL = get_secret("MANUFACTURER_EMAIL")
-
-def send_email(subject, html_body, to_emails):
-    if not SENDER_EMAIL or not SENDER_PASSWORD:
-        print("Email credentials not configured.")
-        return False
-    recipients = [to_emails] if isinstance(to_emails, str) else to_emails
-    try:
-        msg = MIMEMultipart()
-        msg["From"] = SENDER_EMAIL
-        msg["To"] = ", ".join(recipients)
-        msg["Subject"] = subject
-        msg.attach(MIMEText(html_body, "html"))
-        with smtplib.SMTP(SMTP_SERVER, SMTP_PORT) as server:
-            server.starttls()
-            server.login(SENDER_EMAIL, SENDER_PASSWORD)
-            server.sendmail(SENDER_EMAIL, recipients, msg.as_string())
-        return True
-    except Exception as e:
-        print(f"Email send error: {e}")
-        return False
-
-# ====================================================
-# === LOGO & HEADER ===
-# ====================================================
-logo_path = ROOT / "DBN_Metro.png"
-if logo_path.exists():
-    try:
-        with open(logo_path, "rb") as img_file:
-            encoded_logo = base64.b64encode(img_file.read()).decode()
-        st.markdown(
-            f"<div style='text-align:center;'><img src='data:image/png;base64,{encoded_logo}' width='70'/></div>",
-            unsafe_allow_html=True,
-        )
-    except Exception:
-        st.warning("Logo found but couldn't be displayed.")
-else:
-    st.warning("⚠️ Logo not found: DBN_Metro.png")
-
-st.markdown(f"<h1 style='text-align:center;color:{PRIMARY_BLUE};'>Ethekwini Smart Meter Stock Management-WS7761</h1>", unsafe_allow_html=True)
-st.markdown("---")
-
-# ====================================================
-# === AUTHENTICATION ===
-# ====================================================
-def hash_password(p): return hashlib.sha256(p.encode()).hexdigest()
-
-raw_users = {
-    "Deezlo": {"name": "Deezlo", "password": "Deezlo123", "role": "contractor", "email": CONTRACTOR_EMAIL},
-    "Nimba": {"name": "Nimba", "password": "Nimba123", "role": "contractor", "email": CONTRACTOR_EMAIL},
-    "ethekwini": {"name": "ethekwini", "password": "ethekwini123", "role": "city", "email": ETHEKWINI_EMAIL},
-    "installer1": {"name": "installer1", "password": "installer123", "role": "installer", "email": INSTALLER_EMAIL},
-    "Reece": {"name": "Reece", "password": "Reece123!", "role": "manager", "email": MANAGER_EMAIL},
-    "manufacturer1": {"name": "manufacturer1", "password": "manufacturer123", "role": "manufacturer", "email": MANUFACTURER_EMAIL},
-}
-
-CREDENTIALS = {u: {"name": v["name"], "password_hash": hash_password(v["password"]), "role": v["role"], "email": v["email"]} for u, v in raw_users.items()}
-
-if "auth" not in st.session_state:
-    st.session_state.auth = {"logged_in": False, "username": None, "role": None, "name": None}
-
-def safe_rerun():
-    try:
-        st.rerun()
-    except Exception:
-        pass
-
-# ====================================================
-# === DATA HANDLING (Simplified, no backups) ===
-# ====================================================
 def load_data():
-    if DATA_FILE.exists():
+    """Load the main CSV dataset."""
+    if REPORT_FILE.exists():
         try:
-            return pd.read_csv(DATA_FILE, dtype=str)
-        except Exception:
-            pass
-    cols = [
-        "Date_Requested", "Request_ID", "Contractor_Name", "Installer_Name",
-        "Meter_Type", "Requested_Qty", "Approved_Qty", "Photo_Path",
-        "Status", "Contractor_Notes", "City_Notes", "Decline_Reason",
-        "Date_Approved", "Date_Received",
-        "Manufacturer_Name", "Batch_Number", "Dispatch_Qty", "Dispatch_Date", "Dispatch_Note", "Dispatch_Docs"
-    ]
-    return pd.DataFrame(columns=cols)
+            df = pd.read_csv(REPORT_FILE)
+            return df
+        except Exception as e:
+            st.error(f"Error loading report data: {e}")
+            return pd.DataFrame()
+    else:
+        return pd.DataFrame()
 
 def save_data(df):
+    """Save the updated report data locally."""
     try:
-        df.to_csv(DATA_FILE, index=False)
+        df.to_csv(REPORT_FILE, index=False)
     except Exception as e:
-        st.warning(f"Could not save data: {e}")
+        st.error(f"Error saving data: {e}")
 
-def generate_request_id(prefix="REQ"):
-    return f"{prefix}-{datetime.now().strftime('%Y%m%d%H%M%S')}"
-
-# ====================================================
-# === LOGIN UI ===
-# ====================================================
-def login_ui():
-    st.title("🔐 Login")
-    username = st.text_input("Username")
-    password = st.text_input("Password", type="password")
-    if st.button("Login"):
-        if username in CREDENTIALS and hash_password(password) == CREDENTIALS[username]["password_hash"]:
-            st.session_state.auth.update({
-                "logged_in": True,
-                "username": username,
-                "role": CREDENTIALS[username]["role"],
-                "name": CREDENTIALS[username]["name"]
-            })
-            safe_rerun()
-        else:
-            st.error("❌ Invalid credentials")
-
-def logout():
-    st.session_state.auth = {"logged_in": False, "username": None, "role": None, "name": None}
-    safe_rerun()
+def send_email_notification(recipient_email, subject, body):
+    """Send a basic email notification."""
+    try:
+        sender_email = "noreply@acureports.local"
+        msg = MIMEMultipart()
+        msg["From"] = sender_email
+        msg["To"] = recipient_email
+        msg["Subject"] = subject
+        msg.attach(MIMEText(body, "plain"))
+        # Example only: replace with your SMTP details
+        # with smtplib.SMTP("smtp.yourdomain.com", 587) as server:
+        #     server.starttls()
+        #     server.login(sender_email, "password")
+        #     server.send_message(msg)
+        st.success(f"Email sent to {recipient_email} (simulated)")
+    except Exception as e:
+        st.error(f"Email failed: {e}")
 
 # ====================================================
-# === CONTRACTOR UI ===
+# === APP LAYOUT & STYLING ===
 # ====================================================
-def contractor_ui():
-    st.header("Contractor - Submit Stock Request")
-    contractor_name = st.session_state.auth["name"]
-    installer_name = st.text_input("Installer Name")
-    meter_qty = st.number_input("DN15 Meter Quantity", min_value=0, step=1)
-    keypad_qty = st.number_input("CIU Keypad Quantity", min_value=0, step=1)
-    notes = st.text_area("Notes")
-    if st.button("Submit Request"):
-        if not installer_name:
-            st.warning("Please enter installer name")
-        elif meter_qty == 0 and keypad_qty == 0:
-            st.warning("Please request at least one item.")
-        else:
-            df = load_data()
-            base_rid = generate_request_id(prefix="REQ")
-            entries = []
-            for item_type, qty in [("DN15 Meter", meter_qty), ("CIU Keypad", keypad_qty)]:
-                if qty > 0:
-                    rid = f"{base_rid}-{item_type.replace(' ', '_')}"
-                    entries.append({
-                        "Date_Requested": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                        "Request_ID": rid,
-                        "Contractor_Name": contractor_name,
-                        "Installer_Name": installer_name,
-                        "Meter_Type": item_type,
-                        "Requested_Qty": str(qty),
-                        "Approved_Qty": "",
-                        "Photo_Path": "",
-                        "Status": "Pending Verification",
-                        "Contractor_Notes": notes,
-                        "City_Notes": "",
-                        "Decline_Reason": "",
-                        "Date_Approved": "",
-                        "Date_Received": "",
-                        "Manufacturer_Name": "",
-                        "Batch_Number": "",
-                        "Dispatch_Qty": "",
-                        "Dispatch_Date": "",
-                        "Dispatch_Note": "",
-                        "Dispatch_Docs": ""
-                    })
-            df = pd.concat([df, pd.DataFrame(entries)], ignore_index=True)
+
+def load_custom_css():
+    st.markdown("""
+        <style>
+            .reportview-container { background: #F5F7FA; }
+            .sidebar .sidebar-content { background: #003366; color: white; }
+            h1, h2, h3 { color: #003366; }
+            .stButton>button {
+                background-color: #0072BC;
+                color: white;
+                border-radius: 8px;
+                font-weight: 600;
+                padding: 0.5em 1.5em;
+            }
+            .stButton>button:hover {
+                background-color: #005A99;
+                color: white;
+            }
+        </style>
+    """, unsafe_allow_html=True)
+
+load_custom_css()
+
+# ====================================================
+# === MAIN FUNCTIONALITY ===
+# ====================================================
+
+def display_dashboard(username):
+    st.title("Fixed Report Details Dashboard")
+
+    df = load_data()
+
+    # Upload CSV
+    uploaded_file = st.file_uploader("Upload updated CSV", type=["csv"])
+    if uploaded_file:
+        df = pd.read_csv(uploaded_file)
+        save_data(df)
+        st.success("Data uploaded and saved successfully!")
+
+    if df.empty:
+        st.info("No report data available yet.")
+        return
+
+    # Table view
+    st.subheader("Report Summary")
+    st.dataframe(df)
+
+    # Data edit section
+    with st.expander("Add or Edit Record"):
+        new_record = {}
+        for col in ["Date_Requested", "Request_ID", "Contractor_Name", "Installer_Name", "Meter_Type", "Requested_Qty", "Approved_Qty", "Status", "Contractor_Notes"]:
+            new_record[col] = st.text_input(f"{col}", value="")
+
+        if st.button("Add Record"):
+            df = df.append(new_record, ignore_index=True)
             save_data(df)
-            st.success(f"✅ Request(s) submitted under ID {base_rid}")
+            st.success("Record added successfully.")
+
+    # Download CSV
+    csv_data = df.to_csv(index=False).encode('utf-8')
+    st.download_button(
+        label="Download Report as CSV",
+        data=csv_data,
+        file_name="report_data.csv",
+        mime="text/csv"
+    )
+
+    # Email Simulation
+    st.subheader("Send Email Notification")
+    email_recipient = st.text_input("Recipient Email")
+    email_subject = st.text_input("Subject")
+    email_body = st.text_area("Message")
+
+    if st.button("Send Email"):
+        if email_recipient and email_subject:
+            send_email_notification(email_recipient, email_subject, email_body)
+        else:
+            st.warning("Please enter recipient and subject.")
 
 # ====================================================
-# === CITY / MANUFACTURER UIs (Same as before)
+# === LOGIN INTERFACE ===
 # ====================================================
-# (retain your previous logic unchanged)
+
+def login_page():
+    st.markdown("<h2 style='text-align:center;'>Login Portal</h2>", unsafe_allow_html=True)
+
+    with st.form("login_form"):
+        username = st.text_input("Username")
+        password = st.text_input("Password", type="password")
+        submit = st.form_submit_button("Login")
+
+        if submit:
+            if verify_login(username, password):
+                st.session_state["logged_in"] = True
+                st.session_state["username"] = username
+                st.experimental_rerun()
+            else:
+                st.error("Invalid username or password")
+
+# ====================================================
+# === MAIN APP LOGIC ===
+# ====================================================
+
+def main():
+    if "logged_in" not in st.session_state:
+        st.session_state["logged_in"] = False
+
+    if st.session_state["logged_in"]:
+        col1, col2 = st.columns([10, 1])
+        with col2:
+            if st.button("Logout"):
+                st.session_state["logged_in"] = False
+                st.experimental_rerun()
+        display_dashboard(st.session_state["username"])
+    else:
+        login_page()
+
+if __name__ == "__main__":
+    main()
