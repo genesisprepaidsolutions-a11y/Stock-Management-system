@@ -786,6 +786,103 @@ def manager_ui():
     st.header("Project Manager - Reconciliation & Export")
     df = load_data()
     st.dataframe(df.fillna(""), use_container_width=True)
+
+    st.markdown("### 🔎 Record Management (Edit / Delete)")
+    if df.empty:
+        st.info("No records to manage.")
+    else:
+        rec_col, action_col = st.columns([3,2])
+        with rec_col:
+            selected_id = st.selectbox("Select Request ID to edit or delete", [""] + df["Request_ID"].fillna("").tolist())
+        if selected_id:
+            record = df[df["Request_ID"] == selected_id].iloc[0].to_dict()
+            st.markdown("#### Selected Record — editable fields")
+            # Editable fields - choose a subset that makes sense for manager edits
+            with st.form(key=f"edit_form_{selected_id}"):
+                c1, c2 = st.columns(2)
+                contractor_name = c1.text_input("Contractor Name", value=_safe(record.get("Contractor_Name")))
+                installer_name = c2.text_input("Installer Name", value=_safe(record.get("Installer_Name")))
+
+                m1, m2 = st.columns(2)
+                meter_type = m1.text_input("Meter Type", value=_safe(record.get("Meter_Type")))
+                requested_qty = m2.text_input("Requested Qty", value=_safe(record.get("Requested_Qty")))
+
+                a1, a2 = st.columns(2)
+                approved_qty = a1.text_input("Approved Qty", value=_safe(record.get("Approved_Qty")))
+                status_options = sorted(df["Status"].dropna().unique().tolist())
+                if not status_options:
+                    status_options = ["Pending Verification", "Approved / Issued", "Declined", "Received", "Pending City Approval (Manufacturer Delivery)"]
+                status = a2.selectbox("Status", options=status_options, index=status_options.index(_safe(record.get("Status"))) if _safe(record.get("Status")) in status_options else 0)
+
+                mn1, mn2 = st.columns(2)
+                contractor_notes = mn1.text_area("Contractor Notes", value=_safe(record.get("Contractor_Notes")))
+                city_notes = mn2.text_area("City Notes", value=_safe(record.get("City_Notes")))
+
+                manu1, manu2 = st.columns(2)
+                manufacturer_name = manu1.text_input("Manufacturer Name", value=_safe(record.get("Manufacturer_Name")))
+                batch_number = manu2.text_input("Batch Number", value=_safe(record.get("Batch_Number")))
+
+                d1, d2 = st.columns(2)
+                dispatch_qty = d1.text_input("Dispatch Qty", value=_safe(record.get("Dispatch_Qty")))
+                dispatch_date = d2.text_input("Dispatch Date (YYYY-MM-DD)", value=_safe(record.get("Dispatch_Date")))
+
+                # Non-editable but visible for context
+                st.markdown(f"**Request ID:** {selected_id}")
+                st.markdown(f"**Date Requested:** {_safe(record.get('Date_Requested'))}")
+                st.markdown(f"**Photo Path:** {_safe(record.get('Photo_Path'))}")
+
+                submit_edit = st.form_submit_button("Save Changes")
+
+                if submit_edit:
+                    # Defensive updates: ensure df reloaded to avoid concurrency issues
+                    df = load_data()
+                    idx = df.index[df["Request_ID"] == selected_id].tolist()
+                    if not idx:
+                        st.error("Record not found on disk — it may have been removed. Reloading.")
+                        safe_rerun()
+                    else:
+                        i = idx[0]
+                        df.at[i, "Contractor_Name"] = contractor_name
+                        df.at[i, "Installer_Name"] = installer_name
+                        df.at[i, "Meter_Type"] = meter_type
+                        df.at[i, "Requested_Qty"] = requested_qty
+                        df.at[i, "Approved_Qty"] = approved_qty
+                        df.at[i, "Status"] = status
+                        df.at[i, "Contractor_Notes"] = contractor_notes
+                        df.at[i, "City_Notes"] = city_notes
+                        df.at[i, "Manufacturer_Name"] = manufacturer_name
+                        df.at[i, "Batch_Number"] = batch_number
+                        df.at[i, "Dispatch_Qty"] = dispatch_qty
+                        df.at[i, "Dispatch_Date"] = dispatch_date
+                        # if approving now, set Date_Approved if not set
+                        try:
+                            if status == "Approved / Issued" and not _safe(df.at[i, "Date_Approved"]):
+                                df.at[i, "Date_Approved"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                        except Exception:
+                            pass
+                        save_data(df)
+                        st.success("Record updated successfully.")
+                        safe_rerun()
+
+            # Delete area (separate from the form)
+            st.markdown("#### Delete record")
+            st.warning("Deleting a record is irreversible. Proceed with caution.")
+            confirm_delete = st.checkbox("I understand this will permanently delete the selected record.")
+            delete_btn = st.button("Delete Record")
+            if delete_btn:
+                if not confirm_delete:
+                    st.error("Please confirm deletion by ticking the checkbox before pressing Delete.")
+                else:
+                    df = load_data()
+                    if selected_id not in df["Request_ID"].tolist():
+                        st.error("Record not found — it may have already been deleted.")
+                        safe_rerun()
+                    else:
+                        df = df[df["Request_ID"] != selected_id]
+                        save_data(df)
+                        st.success(f"Record {selected_id} deleted.")
+                        safe_rerun()
+
     st.markdown("### 📦 Data Dump & Backup")
     dumps = sorted(DUMP_DIR.glob("*.csv"), reverse=True)
     if dumps:
