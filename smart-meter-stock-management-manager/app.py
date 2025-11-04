@@ -98,23 +98,17 @@ st.markdown(f"""
 
 # ====================================================
 # === DIRECTORY SETUP (PERSISTENT STORAGE) ===
-# Use absolute home-based folder to reduce risk of ephemeral workspace wipes
 # ====================================================
-HOME = Path.home()
-DATA_DIR = HOME / "Acucomm_SmartMeter_Data"  # stable persistent folder in user's home
-PHOTO_DIR = DATA_DIR / "photos"
+DATA_DIR = ROOT / "data"
+PHOTO_DIR = ROOT / "photos"
 ISSUED_PHOTOS_DIR = PHOTO_DIR / "issued"
-REPORT_DIR = DATA_DIR / "reports"
+REPORT_DIR = ROOT / "reports"
 DUMP_DIR = DATA_DIR / "dumps"
-BACKUP_ZIP_PREFIX = DATA_DIR / "data_backup"  # will create data_backup.zip
+BACKUP_ZIP_PREFIX = ROOT / "data_backup"  # will create data_backup.zip
 BACKUP_FILE = Path(str(BACKUP_ZIP_PREFIX) + ".zip")
 
 for d in [DATA_DIR, PHOTO_DIR, ISSUED_PHOTOS_DIR, REPORT_DIR, DUMP_DIR]:
-    try:
-        d.mkdir(parents=True, exist_ok=True)
-    except Exception:
-        # If creating folder fails, log to the app so operator can correct permissions
-        st.warning(f"Could not create folder: {d}. Check permissions.")
+    d.mkdir(parents=True, exist_ok=True)
 
 DATA_FILE = DATA_DIR / "stock_requests.csv"
 
@@ -126,7 +120,6 @@ ONE_DRIVE_BACKUP_DIR = ONE_DRIVE_SYNC_ROOT / "SmartMeter_Backups"
 try:
     ONE_DRIVE_BACKUP_DIR.mkdir(parents=True, exist_ok=True)
 except Exception:
-    # It's acceptable if this fails on non-windows hosts or cloud deploys
     pass
 
 def get_secret(key):
@@ -142,7 +135,6 @@ ONEDRIVE_ACCESS_TOKEN = get_secret("ONEDRIVE_ACCESS_TOKEN")  # optional
 # ====================================================
 def create_local_zip():
     try:
-        # ensure any previous zip removed to avoid stale content
         if BACKUP_FILE.exists():
             try:
                 BACKUP_FILE.unlink()
@@ -239,43 +231,26 @@ def restore_from_zip(zip_path: Path):
         return False
 
 def auto_restore_if_needed():
-    """
-    Improved restore flow:
-    - If DATA_FILE missing or unreadable or empty -> attempt unpacking BACKUP_FILE
-    - If BACKUP_FILE missing, attempt to find latest OneDrive backup and restore
-    - If still nothing, leave DATA_DIR initialized and inform operator
-    """
-    # If CSV exists and appears valid, load and return
     if DATA_FILE.exists():
         try:
-            df = pd.read_csv(DATA_FILE, dtype=str)
-            if df is not None and not df.empty:
-                # valid file present; keep as-is
-                st.info("Local data file found and loaded.")
+            df = pd.read_csv(DATA_FILE)
+            if not df.empty:
                 return
-            else:
-                st.warning("Local data file present but empty. Attempting restoration from backups.")
         except Exception:
-            st.warning("Local data file exists but could not be read (corrupt). Attempting restoration from backups.")
-
-    # Attempt restore from local backup zip next to data dir
+            pass
     if BACKUP_FILE.exists():
         try:
             shutil.unpack_archive(str(BACKUP_FILE), extract_dir=str(DATA_DIR))
             st.info("Restored data from local backup zip.")
             return
         except Exception:
-            st.warning("Local backup zip exists but restore failed.")
-
-    # Attempt OneDrive folder latest backup
+            pass
     latest = find_latest_onedrive_backup()
     if latest:
         restored = restore_from_zip(latest)
         if restored:
             return
-
-    # No backups available to restore
-    st.info("No usable backup found to restore from (local or OneDrive). If this is first run, data folder is initialized empty.")
+    st.info("No backup found to restore from (local or OneDrive). If this is first run, data folder is initialized empty.")
 
 try:
     auto_restore_if_needed()
@@ -285,8 +260,8 @@ except Exception:
 # ====================================================
 # === EMAIL CONFIG ===
 # ====================================================
-SMTP_SERVER = "smtp.acucommholdings.co.za"
-SMTP_PORT = 465
+SMTP_SERVER = "smtp.office365.com"
+SMTP_PORT = 587
 
 SENDER_EMAIL = get_secret("EXCHANGE_EMAIL")
 SENDER_PASSWORD = get_secret("EXCHANGE_PASSWORD")
@@ -366,32 +341,13 @@ def safe_rerun():
 # === DATA HANDLING (with redundancy) ===
 # Add manufacturer-specific fields to the same data file
 # ====================================================
-def load_data(force_reload=False):
-    # Cache in session_state to prevent accidental loss between reruns
-    if "data_cache" in st.session_state and not force_reload:
-        cached = st.session_state.data_cache
-        if isinstance(cached, pd.DataFrame):
-            return cached.copy()
+def load_data():
     if DATA_FILE.exists():
         try:
             df = pd.read_csv(DATA_FILE, dtype=str)
-            # ensure all expected columns exist
-            cols = [
-                "Date_Requested", "Request_ID", "Contractor_Name", "Installer_Name",
-                "Meter_Type", "Requested_Qty", "Approved_Qty", "Photo_Path",
-                "Status", "Contractor_Notes", "City_Notes", "Decline_Reason",
-                "Date_Approved", "Date_Received",
-                # Manufacturer dispatch fields (kept in same CSV)
-                "Manufacturer_Name", "Batch_Number", "Dispatch_Qty", "Dispatch_Date", "Dispatch_Note", "Dispatch_Docs"
-            ]
-            for c in cols:
-                if c not in df.columns:
-                    df[c] = ""
-            st.session_state.data_cache = df.copy()
             return df
         except Exception:
-            st.warning("Could not read data file (it may be corrupt). Returning empty dataframe for safety.")
-    # If file doesn't exist or is unreadable, return empty frame with columns
+            pass
     cols = [
         "Date_Requested", "Request_ID", "Contractor_Name", "Installer_Name",
         "Meter_Type", "Requested_Qty", "Approved_Qty", "Photo_Path",
@@ -400,59 +356,26 @@ def load_data(force_reload=False):
         # Manufacturer dispatch fields (kept in same CSV)
         "Manufacturer_Name", "Batch_Number", "Dispatch_Qty", "Dispatch_Date", "Dispatch_Note", "Dispatch_Docs"
     ]
-    df = pd.DataFrame(columns=cols)
-    st.session_state.data_cache = df.copy()
-    return df
+    return pd.DataFrame(columns=cols)
 
 def save_data(df):
-    """
-    Save main CSV, create a timestamped dump, and attempt backups.
-    Provides explicit verification of write success.
-    """
     try:
-        # ensure directory exists
-        DATA_DIR.mkdir(parents=True, exist_ok=True)
         df.to_csv(DATA_FILE, index=False)
     except Exception as e:
         st.warning(f"Could not save main data file: {e}")
-        return False
-
-    # verify main file written and non-empty
-    try:
-        if not DATA_FILE.exists():
-            st.error("Data save failed: main data file not created.")
-            return False
-        # basic integrity: file size
-        if DATA_FILE.stat().st_size == 0:
-            st.error("Data save failed: main data file is empty.")
-            return False
-    except Exception as e:
-        st.warning(f"Post-save verification error: {e}")
-
-    # create a timestamped dump copy for reconciliation
     try:
         dump_filename = f"stock_requests_{datetime.now().strftime('%Y-%m-%d_%H%M%S')}.csv"
         df.to_csv(DUMP_DIR / dump_filename, index=False)
     except Exception as e:
         st.warning(f"Could not create dump: {e}")
-
-    # update session cache
-    st.session_state.data_cache = df.copy()
-
-    # attempt backup (local copy to OneDrive / Graph)
     try:
         ok = backup_data()
         if ok:
-            st.success("Data saved and backup succeeded (OneDrive copy or Graph upload).")
+            st.success("Backup succeeded (OneDrive copy or Graph upload).")
         else:
-            # local zip should exist at least
-            if BACKUP_FILE.exists():
-                st.info("Data saved. Local backup archive created; remote copy not configured or failed.")
-            else:
-                st.info("Data saved. Backup archive not created.")
+            st.info("Backup created locally; OneDrive copy/upload not configured or failed.")
     except Exception as e:
-        st.warning(f"Automatic backup attempt failed: {e}")
-    return True
+        st.warning(f"Automatic backup failed: {e}")
 
 def generate_request_id(prefix="REQ"):
     return f"{prefix}-{datetime.now().strftime('%Y%m%d%H%M%S')}"
@@ -478,9 +401,6 @@ def login_ui():
 
 def logout():
     st.session_state.auth = {"logged_in": False, "username": None, "role": None, "name": None}
-    # clear data cache to avoid stale sensitive data being held in memory across users
-    if "data_cache" in st.session_state:
-        del st.session_state["data_cache"]
     safe_rerun()
 
 # ====================================================
@@ -537,11 +457,8 @@ def contractor_ui():
                     })
             if entries:
                 df = pd.concat([df, pd.DataFrame(entries)], ignore_index=True)
-                ok = save_data(df)
-                if ok:
-                    st.success(f"✅ Request(s) submitted under base ID {base_rid}")
-                else:
-                    st.error("Failed to save request(s). See warnings above for details.")
+                save_data(df)
+                st.success(f"✅ Request(s) submitted under base ID {base_rid}")
 
 def manufacturer_ui():
     st.header("Manufacturer - Dispatch Stock to City")
@@ -611,27 +528,25 @@ def manufacturer_ui():
 
             if entries:
                 df = pd.concat([df, pd.DataFrame(entries)], ignore_index=True)
-                ok = save_data(df)
-                if ok:
-                    st.success(f"✅ Dispatch submitted to City as base ID {base_rid} ({len(entries)} item rows created)")
-                    # optional: email notify city
-                    try:
-                        if ETHEKWINI_EMAIL:
-                            send_email(
-                                subject=f"Manufacturer Dispatch Pending Approval: {base_rid}",
-                                html_body=f"<p>Manufacturer <b>{manu_name}</b> submitted dispatch <b>{base_rid}</b> (Batch {batch_num}).</p>",
-                                to_emails=ETHEKWINI_EMAIL
-                            )
-                    except Exception:
-                        pass
-                else:
-                    st.error("Failed to save dispatch. See warnings above for details.")
+                save_data(df)
+                st.success(f"✅ Dispatch submitted to City as base ID {base_rid} ({len(entries)} item rows created)")
+                # optional: email notify city
+                try:
+                    if ETHEKWINI_EMAIL:
+                        send_email(
+                            subject=f"Manufacturer Dispatch Pending Approval: {base_rid}",
+                            html_body=f"<p>Manufacturer <b>{manu_name}</b> submitted dispatch <b>{base_rid}</b> (Batch {batch_num}).</p>",
+                            to_emails=ETHEKWINI_EMAIL
+                        )
+                except Exception:
+                    pass
 
 # ====================================================
 # === CITY UI (UPDATED REPORT DETAILS) ===
 # ====================================================
 def _safe(val):
     return "" if val is None or (isinstance(val, float) and pd.isna(val)) else str(val)
+
 
 def _display_file_link(path_str, label="Download"):
     try:
@@ -646,6 +561,7 @@ def _display_file_link(path_str, label="Download"):
     except Exception:
         pass
     return False
+
 
 def city_ui():
     st.header("eThekwini Municipality - Verify Requests & Manufacturer Deliveries")
@@ -760,11 +676,8 @@ def city_ui():
                 df.loc[df["Request_ID"] == sel_id, "Status"] = "Approved / Issued"
                 df.loc[df["Request_ID"] == sel_id, "City_Notes"] = city_notes
                 df.loc[df["Request_ID"] == sel_id, "Date_Approved"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                ok = save_data(df)
-                if ok:
-                    st.success("✅ Manufacturer dispatch approved and issued to stock.")
-                else:
-                    st.error("Failed to persist approval. Check warnings.")
+                save_data(df)
+                st.success("✅ Manufacturer dispatch approved and issued to stock.")
                 # optional: notify manufacturer and manager via email
                 try:
                     recipients = []
@@ -786,11 +699,8 @@ def city_ui():
                 df.loc[df["Request_ID"] == sel_id, "Status"] = "Declined"
                 df.loc[df["Request_ID"] == sel_id, "Decline_Reason"] = reason
                 df.loc[df["Request_ID"] == sel_id, "City_Notes"] = city_notes
-                ok = save_data(df)
-                if ok:
-                    st.error("❌ Manufacturer dispatch declined.")
-                else:
-                    st.error("Declined but failed to persist. Check warnings.")
+                save_data(df)
+                st.error("❌ Manufacturer dispatch declined.")
                 try:
                     if MANUFACTURER_EMAIL:
                         send_email(
@@ -827,20 +737,14 @@ def city_ui():
                 df.loc[df["Request_ID"] == sel_id, "Status"] = "Approved / Issued"
                 df.loc[df["Request_ID"] == sel_id, "City_Notes"] = notes
                 df.loc[df["Request_ID"] == sel_id, "Date_Approved"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                ok = save_data(df)
-                if ok:
-                    st.success("✅ Approved and issued.")
-                else:
-                    st.error("Approval saved failed. Check warnings.")
+                save_data(df)
+                st.success("✅ Approved and issued.")
                 safe_rerun()
             if st.button("Decline Contractor Request"):
                 df.loc[df["Request_ID"] == sel_id, "Status"] = "Declined"
                 df.loc[df["Request_ID"] == sel_id, "Decline_Reason"] = decline_reason
-                ok = save_data(df)
-                if ok:
-                    st.error("❌ Declined.")
-                else:
-                    st.error("Decline failed to persist. Check warnings.")
+                save_data(df)
+                st.error("❌ Declined.")
                 safe_rerun()
         else:
             st.info("Selected record is not actionable from this panel. Use Manager or Installer panels for other operations.")
@@ -874,11 +778,8 @@ def installer_ui():
     if sel and st.button("✅ Mark as Received"):
         df.loc[df["Request_ID"] == sel, "Status"] = "Received"
         df.loc[df["Request_ID"] == sel, "Date_Received"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        ok = save_data(df)
-        if ok:
-            st.success(f"Request {sel} marked as received.")
-        else:
-            st.error("Failed to persist received state.")
+        save_data(df)
+        st.success(f"Request {sel} marked as received.")
         safe_rerun()
 
 def manager_ui():
@@ -913,9 +814,6 @@ def manager_ui():
             ok = restore_from_zip(latest)
             if ok:
                 st.success("Restore complete from OneDrive latest backup. Data reloaded.")
-                # clear and reload cache
-                if "data_cache" in st.session_state:
-                    del st.session_state["data_cache"]
                 safe_rerun()
             else:
                 st.error("Restore failed. Check logs.")
@@ -969,4 +867,3 @@ st.markdown(f"""
         © {datetime.now().year} eThekwini Municipality-WS7761 | Smart Meter Stock Management System
     </div>
 """, unsafe_allow_html=True)
-
