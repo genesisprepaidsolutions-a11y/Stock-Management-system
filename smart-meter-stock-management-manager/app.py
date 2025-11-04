@@ -285,8 +285,8 @@ except Exception:
 # ====================================================
 # === EMAIL CONFIG ===
 # ====================================================
-SMTP_SERVER = "smtp.office365.com"
-SMTP_PORT = 587
+SMTP_SERVER = "smtp.acucommholdings.co.za"
+SMTP_PORT = 465
 
 SENDER_EMAIL = get_secret("EXCHANGE_EMAIL")
 SENDER_PASSWORD = get_secret("EXCHANGE_PASSWORD")
