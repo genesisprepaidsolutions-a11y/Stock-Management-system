@@ -456,8 +456,8 @@ def contractor_ui():
     installer_name = st.text_input("Installer Name")
     st.subheader("Select Stock Items & Quantities")
     col1, col2 = st.columns(2)
-    meter_qty = col1.number_input("DN15 Meter Quantity", min_value=0, value=0, step=1)
-    keypad_qty = col2.number_input("CIU Keypad Quantity", min_value=0, value=0, step=1)
+    meter_qty = col1.number_input("15mm Meter Quantity", min_value=0, value=0, step=1)
+    keypad_qty = col2.number_input("CIU-Token Quantity", min_value=0, value=0, step=1)
     notes = st.text_area("Notes")
     if st.button("Submit Request"):
         if not installer_name:
