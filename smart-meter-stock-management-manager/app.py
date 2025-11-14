@@ -214,7 +214,7 @@ def backup_data(upload_to_gdrive: bool = True, gdrive_folder_id: str = None):
 
     ok_gdrive = False
     if upload_to_gdrive:
-        ok_gdrive = upload_zip_to_gdrive_service(zip_path, parent_folder_id=gdrive_folder_id)
+        ok_gdrive = upload_zip_to_gdrive_service(zip_path, parent_folder_id=171IgGy90h81ecFBs0-8EyUvkbp6jsKLO)
 
     # Inform user
     if ok_local and ok_gdrive:
