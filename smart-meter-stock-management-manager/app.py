@@ -113,6 +113,12 @@ for d in [DATA_DIR, PHOTO_DIR, ISSUED_PHOTOS_DIR, REPORT_DIR, DUMP_DIR]:
 DATA_FILE = DATA_DIR / "stock_requests.csv"
 
 # ====================================================
+# === DEFAULT GOOGLE DRIVE FOLDER (INSERTED) ===
+# ====================================================
+# All Drive uploads will use this folder by default.
+DEFAULT_GDRIVE_FOLDER = "171IgGy90h81ecFBs0-8EyUvkbp6jsKLO"
+
+# ====================================================
 # === SECRET HELPERS ===
 # ====================================================
 def get_secret(key):
@@ -198,7 +204,7 @@ def archive_zip_to_dumps(zip_path: Path):
         st.warning(f"Could not copy zip to dumps folder: {e}")
         return None
 
-def backup_data(upload_to_gdrive: bool = True, gdrive_folder_id: str = None):
+def backup_data(upload_to_gdrive: bool = True, gdrive_folder_id: str = DEFAULT_GDRIVE_FOLDER):
     """
     Create a local zip of DATA_DIR and (optionally) upload to Google Drive.
     Returns True if any backup destination succeeded (local archive + optional gdrive).
@@ -446,7 +452,8 @@ def save_data(df):
     except Exception as e:
         st.warning(f"Could not create dump: {e}")
     try:
-        ok = backup_data()
+        # Automatic backup on every save: local + upload to DEFAULT_GDRIVE_FOLDER
+        ok = backup_data(upload_to_gdrive=True, gdrive_folder_id=DEFAULT_GDRIVE_FOLDER)
         if ok:
             st.success("Backup succeeded (local or Google Drive upload).")
         else:
@@ -998,9 +1005,9 @@ def manager_ui():
     if st.button("Create & Upload Backup Now"):
         zipfile = create_local_zip()
         if zipfile:
-            # Archive a timestamped copy and upload to Google Drive
+            # Archive a timestamped copy and upload to Google Drive (DEFAULT_GDRIVE_FOLDER)
             archived = archive_zip_to_dumps(zipfile)
-            uploaded = upload_zip_to_gdrive_service(zipfile)
+            uploaded = upload_zip_to_gdrive_service(zipfile, parent_folder_id=DEFAULT_GDRIVE_FOLDER)
             if uploaded:
                 st.success("Backup created and uploaded to Google Drive.")
             else:
