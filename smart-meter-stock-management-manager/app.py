@@ -11,7 +11,7 @@ from email.mime.text import MIMEText
 import base64
 import shutil
 import glob
-import requests  # optional: only used if Graph upload is enabled
+import requests  # optional: retained (unused for Drive)
 import json
 from PIL import Image
 
@@ -113,28 +113,28 @@ for d in [DATA_DIR, PHOTO_DIR, ISSUED_PHOTOS_DIR, REPORT_DIR, DUMP_DIR]:
 DATA_FILE = DATA_DIR / "stock_requests.csv"
 
 # ====================================================
-# === ONE DRIVE CONFIG (LOCAL SYNC FOLDER) ===
+# === SECRET HELPERS ===
 # ====================================================
-ONE_DRIVE_SYNC_ROOT = Path(r"C:\Users\ADMIN\OneDrive")
-ONE_DRIVE_BACKUP_DIR = ONE_DRIVE_SYNC_ROOT / "SmartMeter_Backups"
-try:
-    ONE_DRIVE_BACKUP_DIR.mkdir(parents=True, exist_ok=True)
-except Exception:
-    pass
-
 def get_secret(key):
     try:
         return st.secrets[key]
     except Exception:
         return os.getenv(key)
 
-ONEDRIVE_ACCESS_TOKEN = get_secret("ONEDRIVE_ACCESS_TOKEN")  # optional
+# ====================================================
+# === GOOGLE DRIVE CONFIG (SERVICE ACCOUNT) ===
+# ====================================================
+# Place your service account JSON file next to this file named "service_account.json"
+SERVICE_ACCOUNT_FILE = ROOT / "service_account.json"
+# Scope to allow file creation in Drive root or shared folder
+GDRIVE_SCOPES = ['https://www.googleapis.com/auth/drive.file']
 
 # ====================================================
 # === BACKUP & RESTORE HELPERS ===
 # ====================================================
 def create_local_zip():
     try:
+        # Remove existing generic backup.zip if present, then create a new one
         if BACKUP_FILE.exists():
             try:
                 BACKUP_FILE.unlink()
@@ -146,66 +146,105 @@ def create_local_zip():
         st.warning(f"Could not create archive: {e}")
         return None
 
-def copy_zip_to_onedrive(zip_path: Path):
-    if not ONE_DRIVE_BACKUP_DIR or not Path(ONE_DRIVE_BACKUP_DIR).exists():
-        return False
+# Google Drive upload using service account (Option A)
+def upload_zip_to_gdrive_service(zip_path: Path, parent_folder_id: str = None):
+    """
+    Upload backup ZIP to Google Drive root (or a specified folder) using a service account.
+    parent_folder_id: optional Drive folder ID string; if None the file is placed in the service account's Drive root.
+    Returns True on success, False on failure.
+    """
     try:
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        dest = ONE_DRIVE_BACKUP_DIR / f"{zip_path.stem}_{timestamp}{zip_path.suffix}"
-        shutil.copy2(zip_path, dest)
-        st.info(f"Backup copied to OneDrive folder: {dest}")
+        # import here to avoid hard failure at module import time if libs are missing
+        from google.oauth2 import service_account
+        from googleapiclient.discovery import build
+        from googleapiclient.http import MediaFileUpload
+    except Exception as imp_err:
+        st.warning("Google Drive libraries not installed. Install with:\n"
+                   "`pip install google-api-python-client google-auth-httplib2 google-auth-oauthlib google-auth`")
+        st.warning(f"Import error: {imp_err}")
+        return False
+
+    try:
+        if not SERVICE_ACCOUNT_FILE.exists():
+            st.warning("service_account.json not found. Place your service account JSON next to the app and name it 'service_account.json'.")
+            return False
+
+        creds = service_account.Credentials.from_service_account_file(str(SERVICE_ACCOUNT_FILE), scopes=GDRIVE_SCOPES)
+        service = build('drive', 'v3', credentials=creds)
+
+        file_metadata = {'name': zip_path.name}
+        if parent_folder_id:
+            file_metadata['parents'] = [parent_folder_id]
+
+        media = MediaFileUpload(str(zip_path), mimetype='application/zip', resumable=True)
+        request = service.files().create(body=file_metadata, media_body=media, fields='id').execute()
+        file_id = request.get('id')
+        st.info(f"Backup uploaded to Google Drive (File ID: {file_id})")
         return True
     except Exception as e:
-        st.warning(f"Failed to copy backup to OneDrive folder: {e}")
+        st.warning(f"Google Drive upload failed: {e}")
         return False
 
-def upload_zip_to_onedrive_graph(zip_path: Path):
-    token = ONEDRIVE_ACCESS_TOKEN
-    if not token:
-        return False
+def archive_zip_to_dumps(zip_path: Path):
+    """
+    Copy the created zip to the dumps folder with a timestamped filename for local retention.
+    """
     try:
-        filename = zip_path.name
-        remote_path = f"/Apps/AcucommBackups/{filename}"
-        upload_url = f"https://graph.microsoft.com/v1.0/me/drive/root:{remote_path}:/content"
-        headers = {
-            "Authorization": f"Bearer {token}",
-            "Content-Type": "application/zip"
-        }
-        with open(zip_path, "rb") as f:
-            resp = requests.put(upload_url, headers=headers, data=f)
-        if resp.status_code in (200, 201):
-            st.info("Backup uploaded to OneDrive via Microsoft Graph.")
-            return True
-        else:
-            st.warning(f"Graph upload failed ({resp.status_code}): {resp.text}")
-            return False
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        dest = DUMP_DIR / f"{zip_path.stem}_{timestamp}{zip_path.suffix}"
+        shutil.copy2(zip_path, dest)
+        return dest
     except Exception as e:
-        st.warning(f"Exception uploading to Graph: {e}")
-        return False
+        st.warning(f"Could not copy zip to dumps folder: {e}")
+        return None
 
-def backup_data():
+def backup_data(upload_to_gdrive: bool = True, gdrive_folder_id: str = None):
+    """
+    Create a local zip of DATA_DIR and (optionally) upload to Google Drive.
+    Returns True if any backup destination succeeded (local archive + optional gdrive).
+    """
     zip_path = create_local_zip()
     if not zip_path:
         return False
-    ok_local = copy_zip_to_onedrive(zip_path)
-    ok_graph = upload_zip_to_onedrive_graph(zip_path)
-    return ok_local or ok_graph
 
-def find_latest_onedrive_backup():
+    # Always archive a timestamped copy to dumps
+    archived = archive_zip_to_dumps(zip_path)
+
+    ok_local = True if zip_path.exists() else False
+
+    ok_gdrive = False
+    if upload_to_gdrive:
+        ok_gdrive = upload_zip_to_gdrive_service(zip_path, parent_folder_id=gdrive_folder_id)
+
+    # Inform user
+    if ok_local and ok_gdrive:
+        st.success("Backup created locally and uploaded to Google Drive.")
+    elif ok_local and not ok_gdrive:
+        st.warning("Backup created locally, but upload to Google Drive failed or not configured.")
+    elif not ok_local and ok_gdrive:
+        st.info("Backup uploaded to Google Drive (local archive not found).")
+    else:
+        st.error("Backup failed (no local archive and no Google Drive upload).")
+
+    return ok_local or ok_gdrive
+
+def find_latest_local_backup():
+    """
+    Find the latest backup ZIP either at ROOT (data_backup.zip variants) or in DUMP_DIR.
+    Returns Path or None.
+    """
     try:
-        if not ONE_DRIVE_BACKUP_DIR.exists():
-            return None
-        pattern = str(ONE_DRIVE_BACKUP_DIR / "data_backup_*.zip")
-        matches = sorted(glob.glob(pattern), reverse=True)
-        if matches:
-            return Path(matches[0])
-        pattern2 = str(ONE_DRIVE_BACKUP_DIR / "data_backup*.zip")
-        matches2 = sorted(glob.glob(pattern2), reverse=True)
-        if matches2:
-            return Path(matches2[0])
-        zips = sorted(ONE_DRIVE_BACKUP_DIR.glob("*.zip"), key=lambda p: p.stat().st_mtime, reverse=True)
-        if zips:
-            return zips[0]
+        # Check dumps folder for timestamped zips
+        dumps_zips = sorted(DUMP_DIR.glob("data_backup_*.zip"), key=lambda p: p.stat().st_mtime, reverse=True)
+        if dumps_zips:
+            return dumps_zips[0]
+        # Also check for any zipped backups in dumps
+        dumps_any = sorted(DUMP_DIR.glob("*.zip"), key=lambda p: p.stat().st_mtime, reverse=True)
+        if dumps_any:
+            return dumps_any[0]
+        # Fallback: data_backup.zip at ROOT
+        if BACKUP_FILE.exists():
+            return BACKUP_FILE
     except Exception:
         pass
     return None
@@ -245,12 +284,12 @@ def auto_restore_if_needed():
             return
         except Exception:
             pass
-    latest = find_latest_onedrive_backup()
+    latest = find_latest_local_backup()
     if latest:
         restored = restore_from_zip(latest)
         if restored:
             return
-    st.info("No backup found to restore from (local or OneDrive). If this is first run, data folder is initialized empty.")
+    st.info("No backup found to restore from local dumps. If this is first run, data folder is initialized empty.")
 
 try:
     auto_restore_if_needed()
@@ -409,9 +448,9 @@ def save_data(df):
     try:
         ok = backup_data()
         if ok:
-            st.success("Backup succeeded (OneDrive copy or Graph upload).")
+            st.success("Backup succeeded (local or Google Drive upload).")
         else:
-            st.info("Backup created locally; OneDrive copy/upload not configured or failed.")
+            st.info("Backup created locally; Google Drive upload not configured or failed.")
     except Exception as e:
         st.warning(f"Automatic backup failed: {e}")
 
@@ -959,24 +998,33 @@ def manager_ui():
     if st.button("Create & Upload Backup Now"):
         zipfile = create_local_zip()
         if zipfile:
-            one_local = copy_zip_to_onedrive(zipfile)
-            graph_uploaded = upload_zip_to_onedrive_graph(zipfile)
-            if one_local or graph_uploaded:
-                st.success("Backup created and sent to configured OneDrive destination.")
+            # Archive a timestamped copy and upload to Google Drive
+            archived = archive_zip_to_dumps(zipfile)
+            uploaded = upload_zip_to_gdrive_service(zipfile)
+            if uploaded:
+                st.success("Backup created and uploaded to Google Drive.")
             else:
-                st.warning("Backup created locally but OneDrive upload not configured or failed.")
-    st.markdown("### 🔄 Restore from Latest OneDrive Backup")
-    if st.button("Restore Latest OneDrive Backup"):
-        latest = find_latest_onedrive_backup()
+                # still offer the local zip for download
+                st.warning("Google Drive upload failed or not configured. Local backup created.")
+            # provide download button for the created zip
+            try:
+                with open(zipfile, "rb") as f:
+                    data = f.read()
+                st.download_button("Download Backup ZIP", data, zipfile.name, "application/zip")
+            except Exception as e:
+                st.warning(f"Could not create download button: {e}")
+    st.markdown("### 🔄 Restore from Latest Local Backup")
+    if st.button("Restore Latest Local Backup"):
+        latest = find_latest_local_backup()
         if latest:
             ok = restore_from_zip(latest)
             if ok:
-                st.success("Restore complete from OneDrive latest backup. Data reloaded.")
+                st.success("Restore complete from latest local backup. Data reloaded.")
                 safe_rerun()
             else:
                 st.error("Restore failed. Check logs.")
         else:
-            st.warning("No OneDrive backups found in configured folder.")
+            st.warning("No local backups found in dumps or root folder.")
 
 # ====================================================
 # === ROUTING ===
@@ -988,7 +1036,7 @@ else:
     st.sidebar.markdown(f"**Role:** {st.session_state.auth['role'].title()}")
     if st.sidebar.button("Logout"):
         logout()
-    role = st.session_state.auth["role"]
+    role = st.session_state.auth['role']
     if role == "contractor":
         contractor_ui()
     elif role == "city":
@@ -1025,3 +1073,4 @@ st.markdown(f"""
         © {datetime.now().year} eThekwini Municipality-WS7761 | Smart Meter Stock Management System
     </div>
 """, unsafe_allow_html=True)
+
