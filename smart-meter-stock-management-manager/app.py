@@ -14,6 +14,7 @@ import glob
 import requests  # optional: only used if Graph upload is enabled and Dropbox
 import json
 from PIL import Image
+import time
 
 # ====================================================
 # === THEME & BRAND COLOURS ===
@@ -129,11 +130,80 @@ def get_secret(key):
         return os.getenv(key)
 
 ONEDRIVE_ACCESS_TOKEN = get_secret("ONEDRIVE_ACCESS_TOKEN")  # optional
+
 # ====================================================
-# === DROPBOX CONFIG (Option 1: access token in secrets) ===
+# === DROPBOX CONFIG (Refresh token flow - secrets) ===
 # ====================================================
-DROPBOX_TOKEN = get_secret("DROPBOX_TOKEN")  # user confirmed Option 1: key name DROPBOX_TOKEN
-DROPBOX_BACKUP_FOLDER = "/Apps/AcucommBackups"  # Dropbox path
+# Dropbox backup folder (inside Apps/<your-app>)
+DROPBOX_BACKUP_FOLDER = "/Apps/AcucommBackups"  # Dropbox path (apps folder)
+
+# NOTE: we expect these exact secret keys in your secrets.toml:
+# DROPBOX_refresh_token
+# DROPBOX_app_key
+# DROPBOX_app_secret
+
+def get_dropbox_credentials():
+    """
+    Return tuple (refresh_token, app_key, app_secret) from secrets or env.
+    Uses get_secret so it reads from st.secrets or environment variables.
+    """
+    refresh = get_secret("DROPBOX_refresh_token")
+    app_key = get_secret("DROPBOX_app_key")
+    app_secret = get_secret("DROPBOX_app_secret")
+    return refresh, app_key, app_secret
+
+def get_dropbox_access_token(force_refresh=False):
+    """
+    Obtain an access token from Dropbox using the refresh token flow.
+    Caches token + expiry in st.session_state to avoid unnecessary calls.
+    Returns access_token string or None on failure.
+    """
+    refresh, app_key, app_secret = get_dropbox_credentials()
+    if not refresh or not app_key or not app_secret:
+        # secrets not provided
+        return None
+
+    # session cache
+    now = time.time()
+    token_info = st.session_state.get("dropbox_token_info", None)
+    if token_info and not force_refresh:
+        expires_at = token_info.get("expires_at", 0)
+        # if token still valid (give 30s leeway)
+        if expires_at and (expires_at - 30) > now:
+            return token_info.get("access_token")
+
+    # Make request to Dropbox OAuth2 token endpoint
+    try:
+        resp = requests.post(
+            "https://api.dropbox.com/oauth2/token",
+            data={
+                "grant_type": "refresh_token",
+                "refresh_token": refresh,
+                "client_id": app_key,
+                "client_secret": app_secret
+            },
+            timeout=30
+        )
+        if resp.status_code == 200:
+            j = resp.json()
+            access = j.get("access_token")
+            expires_in = j.get("expires_in", 4 * 60 * 60)  # default 4 hours if not provided
+            if access:
+                st.session_state["dropbox_token_info"] = {
+                    "access_token": access,
+                    "expires_at": now + int(expires_in)
+                }
+                return access
+        else:
+            # Try to capture error in session for debugging
+            try:
+                st.session_state["dropbox_oauth_error"] = resp.json()
+            except Exception:
+                st.session_state["dropbox_oauth_error_text"] = resp.text
+    except Exception as e:
+        st.session_state["dropbox_oauth_exception"] = str(e)
+
+    return None
 
 # ====================================================
 # === BACKUP & RESTORE HELPERS ===
@@ -189,30 +259,40 @@ def upload_zip_to_onedrive_graph(zip_path: Path):
         return False
 
 # ---------------------------
-# Dropbox helpers
+# Dropbox helpers (refresh-token based)
 # ---------------------------
 def ensure_dropbox_folder():
     """Make sure the Dropbox apps backup folder exists (creates if needed)."""
-    if not DROPBOX_TOKEN:
+    token = get_dropbox_access_token()
+    if not token:
         return False
     try:
         url = "https://api.dropboxapi.com/2/files/create_folder_v2"
-        headers = {"Authorization": f"Bearer {DROPBOX_TOKEN}", "Content-Type": "application/json"}
+        headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
         payload = {"path": DROPBOX_BACKUP_FOLDER, "autorename": False}
-        # Attempt to create; if it exists, Dropbox returns an error which we ignore
         resp = requests.post(url, headers=headers, json=payload, timeout=30)
         # 200/201 okay; 409 (path/conflict) means folder exists — that's fine
         if resp.status_code in (200, 201):
             return True
         if resp.status_code == 409:
             return True
+        # If token was invalid, try a forced refresh once
+        if resp.status_code in (401, 400):
+            token2 = get_dropbox_access_token(force_refresh=True)
+            if token2 and token2 != token:
+                headers["Authorization"] = f"Bearer {token2}"
+                resp2 = requests.post(url, headers=headers, json=payload, timeout=30)
+                if resp2.status_code in (200, 201, 409):
+                    return True
     except Exception:
         pass
     return True  # best-effort; allow uploads to attempt anyway
 
 def upload_zip_to_dropbox(zip_path: Path):
     """Upload a zip to Dropbox Apps folder using content endpoint."""
-    if not DROPBOX_TOKEN:
+    token = get_dropbox_access_token()
+    if not token:
+        st.warning("Dropbox credentials are not configured (missing refresh token/app key/app secret).")
         return False
     try:
         ensure_dropbox_folder()
@@ -220,7 +300,7 @@ def upload_zip_to_dropbox(zip_path: Path):
         drop_path = f"{DROPBOX_BACKUP_FOLDER}/{filename}"
         upload_url = "https://content.dropboxapi.com/2/files/upload"
         headers = {
-            "Authorization": f"Bearer {DROPBOX_TOKEN}",
+            "Authorization": f"Bearer {token}",
             "Dropbox-API-Arg": json.dumps({
                 "path": drop_path,
                 "mode": "add",
@@ -236,6 +316,15 @@ def upload_zip_to_dropbox(zip_path: Path):
             st.info(f"Backup uploaded to Dropbox: {drop_path}")
             return True
         else:
+            # If unauthorized/expired, attempt a forced refresh and retry once
+            if resp.status_code in (401, 400):
+                token2 = get_dropbox_access_token(force_refresh=True)
+                if token2:
+                    headers["Authorization"] = f"Bearer {token2}"
+                    resp2 = requests.post(upload_url, headers=headers, data=data, timeout=120)
+                    if resp2.status_code in (200, 201):
+                        st.info(f"Backup uploaded to Dropbox after refresh: {drop_path}")
+                        return True
             st.warning(f"Dropbox upload failed ({resp.status_code}): {resp.text}")
             return False
     except Exception as e:
@@ -244,25 +333,36 @@ def upload_zip_to_dropbox(zip_path: Path):
 
 def list_dropbox_backups():
     """Return list of file metadata in the backup folder, or [] on error."""
-    if not DROPBOX_TOKEN:
+    token = get_dropbox_access_token()
+    if not token:
         return []
     try:
         url = "https://api.dropboxapi.com/2/files/list_folder"
-        headers = {"Authorization": f"Bearer {DROPBOX_TOKEN}", "Content-Type": "application/json"}
+        headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
         payload = {"path": DROPBOX_BACKUP_FOLDER, "recursive": False, "limit": 100}
         resp = requests.post(url, headers=headers, json=payload, timeout=30)
         if resp.status_code != 200:
+            # try forced refresh once
+            if resp.status_code in (401, 400):
+                token2 = get_dropbox_access_token(force_refresh=True)
+                if token2:
+                    headers["Authorization"] = f"Bearer {token2}"
+                    resp2 = requests.post(url, headers=headers, json=payload, timeout=30)
+                    if resp2.status_code == 200:
+                        data = resp2.json()
+                        entries = data.get("entries", [])
+                        files = [e for e in entries if e.get(".tag") == "file"]
+                        return files
             return []
         data = resp.json()
         entries = data.get("entries", [])
-        # Filter only files
         files = [e for e in entries if e.get(".tag") == "file"]
         return files
     except Exception:
         return []
 
 def find_latest_dropbox_backup():
-    """Return Path object to a downloaded local copy of the latest dropbox backup (if we download), or return remote path string."""
+    """Return metadata of the latest dropbox backup entry or None."""
     files = list_dropbox_backups()
     if not files:
         return None
@@ -271,18 +371,18 @@ def find_latest_dropbox_backup():
         return e.get("server_modified") or e.get("client_modified") or e.get("name")
     files_sorted = sorted(files, key=key_fn, reverse=True)
     latest = files_sorted[0]
-    # return remote path stored in metadata
-    remote_path = latest.get("path_lower") or latest.get("path_display")
     return latest if latest else None
 
 def download_dropbox_file(remote_path: str, dest: Path):
     """Download a dropbox file (remote_path e.g. /Apps/AcucommBackups/data_backup.zip) to local dest Path."""
-    if not DROPBOX_TOKEN:
+    token = get_dropbox_access_token()
+    if not token:
+        st.warning("Dropbox credentials are not configured (missing refresh token/app key/app secret).")
         return False
     try:
         download_url = "https://content.dropboxapi.com/2/files/download"
         headers = {
-            "Authorization": f"Bearer {DROPBOX_TOKEN}",
+            "Authorization": f"Bearer {token}",
             "Dropbox-API-Arg": json.dumps({"path": remote_path})
         }
         resp = requests.post(download_url, headers=headers, timeout=120)
@@ -291,6 +391,16 @@ def download_dropbox_file(remote_path: str, dest: Path):
                 f.write(resp.content)
             return True
         else:
+            # try forced refresh once if unauthorized
+            if resp.status_code in (401, 400):
+                token2 = get_dropbox_access_token(force_refresh=True)
+                if token2:
+                    headers["Authorization"] = f"Bearer {token2}"
+                    resp2 = requests.post(download_url, headers=headers, timeout=120)
+                    if resp2.status_code == 200:
+                        with open(dest, "wb") as f:
+                            f.write(resp2.content)
+                        return True
             st.warning(f"Dropbox download failed ({resp.status_code}): {resp.text}")
             return False
     except Exception as e:
@@ -1167,7 +1277,7 @@ def manager_ui():
                     st.success("Restore complete from Dropbox latest backup. Data reloaded.")
                     safe_rerun()
                 else:
-                    st.error("Restore from Dropbox failed. Check logs.")
+                    st.error("Restore from Dropbox failed.")
             else:
                 st.error("Download from Dropbox failed.")
 
