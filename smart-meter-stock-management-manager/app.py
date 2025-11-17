@@ -515,7 +515,7 @@ except Exception:
 # ====================================================
 # === EMAIL CONFIG ===
 # ====================================================
-SMTP_SERVER = "mail.acucommholdings.co.za"
+SMTP_SERVER = "smtp.acucommholdings.co.za"
 SMTP_PORT = 465
 
 # Use secret if set; otherwise fall back to the admin address provided.
