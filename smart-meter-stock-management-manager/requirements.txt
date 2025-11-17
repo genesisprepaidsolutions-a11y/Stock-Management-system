@@ -3,4 +3,4 @@ pandas
 Pillow
 reportlab
 exchangelib
-supabase
+dropbox
