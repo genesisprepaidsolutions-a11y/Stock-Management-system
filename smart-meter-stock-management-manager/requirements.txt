@@ -4,3 +4,4 @@ Pillow
 reportlab
 exchangelib
 dropbox
+sendgrid
