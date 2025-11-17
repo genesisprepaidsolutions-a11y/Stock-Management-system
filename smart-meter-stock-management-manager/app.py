@@ -11,7 +11,7 @@ from email.mime.text import MIMEText
 import base64
 import shutil
 import glob
-import requests  # optional: only used if Graph upload is enabled
+import requests  # optional: only used if Graph upload is enabled and Dropbox
 import json
 from PIL import Image
 
@@ -129,6 +129,11 @@ def get_secret(key):
         return os.getenv(key)
 
 ONEDRIVE_ACCESS_TOKEN = get_secret("ONEDRIVE_ACCESS_TOKEN")  # optional
+# ====================================================
+# === DROPBOX CONFIG (Option 1: access token in secrets) ===
+# ====================================================
+DROPBOX_TOKEN = get_secret("DROPBOX_TOKEN")  # user confirmed Option 1: key name DROPBOX_TOKEN
+DROPBOX_BACKUP_FOLDER = "/Apps/AcucommBackups"  # Dropbox path
 
 # ====================================================
 # === BACKUP & RESTORE HELPERS ===
@@ -183,13 +188,124 @@ def upload_zip_to_onedrive_graph(zip_path: Path):
         st.warning(f"Exception uploading to Graph: {e}")
         return False
 
+# ---------------------------
+# Dropbox helpers
+# ---------------------------
+def ensure_dropbox_folder():
+    """Make sure the Dropbox apps backup folder exists (creates if needed)."""
+    if not DROPBOX_TOKEN:
+        return False
+    try:
+        url = "https://api.dropboxapi.com/2/files/create_folder_v2"
+        headers = {"Authorization": f"Bearer {DROPBOX_TOKEN}", "Content-Type": "application/json"}
+        payload = {"path": DROPBOX_BACKUP_FOLDER, "autorename": False}
+        # Attempt to create; if it exists, Dropbox returns an error which we ignore
+        resp = requests.post(url, headers=headers, json=payload, timeout=30)
+        # 200/201 okay; 409 (path/conflict) means folder exists — that's fine
+        if resp.status_code in (200, 201):
+            return True
+        if resp.status_code == 409:
+            return True
+    except Exception:
+        pass
+    return True  # best-effort; allow uploads to attempt anyway
+
+def upload_zip_to_dropbox(zip_path: Path):
+    """Upload a zip to Dropbox Apps folder using content endpoint."""
+    if not DROPBOX_TOKEN:
+        return False
+    try:
+        ensure_dropbox_folder()
+        filename = zip_path.name
+        drop_path = f"{DROPBOX_BACKUP_FOLDER}/{filename}"
+        upload_url = "https://content.dropboxapi.com/2/files/upload"
+        headers = {
+            "Authorization": f"Bearer {DROPBOX_TOKEN}",
+            "Dropbox-API-Arg": json.dumps({
+                "path": drop_path,
+                "mode": "add",
+                "autorename": True,
+                "mute": False
+            }),
+            "Content-Type": "application/octet-stream"
+        }
+        with open(zip_path, "rb") as f:
+            data = f.read()
+        resp = requests.post(upload_url, headers=headers, data=data, timeout=120)
+        if resp.status_code in (200, 201):
+            st.info(f"Backup uploaded to Dropbox: {drop_path}")
+            return True
+        else:
+            st.warning(f"Dropbox upload failed ({resp.status_code}): {resp.text}")
+            return False
+    except Exception as e:
+        st.warning(f"Exception uploading to Dropbox: {e}")
+        return False
+
+def list_dropbox_backups():
+    """Return list of file metadata in the backup folder, or [] on error."""
+    if not DROPBOX_TOKEN:
+        return []
+    try:
+        url = "https://api.dropboxapi.com/2/files/list_folder"
+        headers = {"Authorization": f"Bearer {DROPBOX_TOKEN}", "Content-Type": "application/json"}
+        payload = {"path": DROPBOX_BACKUP_FOLDER, "recursive": False, "limit": 100}
+        resp = requests.post(url, headers=headers, json=payload, timeout=30)
+        if resp.status_code != 200:
+            return []
+        data = resp.json()
+        entries = data.get("entries", [])
+        # Filter only files
+        files = [e for e in entries if e.get(".tag") == "file"]
+        return files
+    except Exception:
+        return []
+
+def find_latest_dropbox_backup():
+    """Return Path object to a downloaded local copy of the latest dropbox backup (if we download), or return remote path string."""
+    files = list_dropbox_backups()
+    if not files:
+        return None
+    # Choose latest by server_modified if available, otherwise by name
+    def key_fn(e):
+        return e.get("server_modified") or e.get("client_modified") or e.get("name")
+    files_sorted = sorted(files, key=key_fn, reverse=True)
+    latest = files_sorted[0]
+    # return remote path stored in metadata
+    remote_path = latest.get("path_lower") or latest.get("path_display")
+    return latest if latest else None
+
+def download_dropbox_file(remote_path: str, dest: Path):
+    """Download a dropbox file (remote_path e.g. /Apps/AcucommBackups/data_backup.zip) to local dest Path."""
+    if not DROPBOX_TOKEN:
+        return False
+    try:
+        download_url = "https://content.dropboxapi.com/2/files/download"
+        headers = {
+            "Authorization": f"Bearer {DROPBOX_TOKEN}",
+            "Dropbox-API-Arg": json.dumps({"path": remote_path})
+        }
+        resp = requests.post(download_url, headers=headers, timeout=120)
+        if resp.status_code == 200:
+            with open(dest, "wb") as f:
+                f.write(resp.content)
+            return True
+        else:
+            st.warning(f"Dropbox download failed ({resp.status_code}): {resp.text}")
+            return False
+    except Exception as e:
+        st.warning(f"Exception downloading from Dropbox: {e}")
+        return False
+
 def backup_data():
     zip_path = create_local_zip()
     if not zip_path:
         return False
     ok_local = copy_zip_to_onedrive(zip_path)
     ok_graph = upload_zip_to_onedrive_graph(zip_path)
-    return ok_local or ok_graph
+    ok_dropbox = upload_zip_to_dropbox(zip_path)
+    # Return True if any destination succeeded
+    return ok_local or ok_graph or ok_dropbox
 
 def find_latest_onedrive_backup():
     try:
@@ -231,6 +347,14 @@ def restore_from_zip(zip_path: Path):
         return False
 
 def auto_restore_if_needed():
+    """
+    On start, attempt restore in this order:
+      1) If DATA_FILE exists and has data -> do nothing
+      2) If local BACKUP_FILE exists -> restore from it
+      3) If OneDrive folder has backups -> restore from latest
+      4) If Dropbox has backups -> download latest and restore
+      5) Otherwise initialize empty
+    """
     if DATA_FILE.exists():
         try:
             df = pd.read_csv(DATA_FILE)
@@ -238,6 +362,7 @@ def auto_restore_if_needed():
                 return
         except Exception:
             pass
+    # 2) local zip
     if BACKUP_FILE.exists():
         try:
             shutil.unpack_archive(str(BACKUP_FILE), extract_dir=str(DATA_DIR))
@@ -245,12 +370,32 @@ def auto_restore_if_needed():
             return
         except Exception:
             pass
+    # 3) OneDrive
     latest = find_latest_onedrive_backup()
     if latest:
         restored = restore_from_zip(latest)
         if restored:
             return
-    st.info("No backup found to restore from (local or OneDrive). If this is first run, data folder is initialized empty.")
+    # 4) Dropbox
+    try:
+        drop_latest_meta = find_latest_dropbox_backup()
+        if drop_latest_meta:
+            remote_path = drop_latest_meta.get("path_display") or drop_latest_meta.get("path_lower")
+            if remote_path:
+                # Download to a temporary local file
+                tmp_dest = ROOT / f"dropbox_{datetime.now().strftime('%Y%m%d_%H%M%S')}.zip"
+                ok = download_dropbox_file(remote_path, tmp_dest)
+                if ok and tmp_dest.exists():
+                    restored = restore_from_zip(tmp_dest)
+                    try:
+                        tmp_dest.unlink()
+                    except Exception:
+                        pass
+                    if restored:
+                        return
+    except Exception:
+        pass
+    st.info("No backup found to restore from (local, OneDrive, or Dropbox). If this is first run, data folder is initialized empty.")
 
 try:
     auto_restore_if_needed()
@@ -409,9 +554,9 @@ def save_data(df):
     try:
         ok = backup_data()
         if ok:
-            st.success("Backup succeeded (OneDrive copy or Graph upload).")
+            st.success("Backup succeeded (OneDrive or Dropbox upload).")
         else:
-            st.info("Backup created locally; OneDrive copy/upload not configured or failed.")
+            st.info("Backup created locally; OneDrive/Dropbox upload not configured or failed.")
     except Exception as e:
         st.warning(f"Automatic backup failed: {e}")
 
@@ -961,10 +1106,11 @@ def manager_ui():
         if zipfile:
             one_local = copy_zip_to_onedrive(zipfile)
             graph_uploaded = upload_zip_to_onedrive_graph(zipfile)
-            if one_local or graph_uploaded:
-                st.success("Backup created and sent to configured OneDrive destination.")
+            dropbox_uploaded = upload_zip_to_dropbox(zipfile)
+            if one_local or graph_uploaded or dropbox_uploaded:
+                st.success("Backup created and uploaded to at least one configured destination (OneDrive/Dropbox).")
             else:
-                st.warning("Backup created locally but OneDrive upload not configured or failed.")
+                st.warning("Backup created locally but remote uploads (OneDrive/Dropbox) not configured or failed.")
     st.markdown("### 🔄 Restore from Latest OneDrive Backup")
     if st.button("Restore Latest OneDrive Backup"):
         latest = find_latest_onedrive_backup()
@@ -976,7 +1122,54 @@ def manager_ui():
             else:
                 st.error("Restore failed. Check logs.")
         else:
-            st.warning("No OneDrive backups found in configured folder.")
+            # If no OneDrive backup found, try Dropbox
+            st.warning("No OneDrive backups found in configured folder. Trying Dropbox...")
+            drop_meta = find_latest_dropbox_backup()
+            if drop_meta:
+                remote_path = drop_meta.get("path_display") or drop_meta.get("path_lower")
+                if remote_path:
+                    tmp_dest = ROOT / f"dropbox_restore_{datetime.now().strftime('%Y%m%d_%H%M%S')}.zip"
+                    ok = download_dropbox_file(remote_path, tmp_dest)
+                    if ok:
+                        ok2 = restore_from_zip(tmp_dest)
+                        try:
+                            tmp_dest.unlink()
+                        except Exception:
+                            pass
+                        if ok2:
+                            st.success("Restore complete from Dropbox latest backup. Data reloaded.")
+                            safe_rerun()
+                        else:
+                            st.error("Restore from Dropbox failed. Check logs.")
+                    else:
+                        st.error("Download from Dropbox failed.")
+                else:
+                    st.error("Dropbox metadata malformed; cannot find remote path.")
+            else:
+                st.warning("No Dropbox backups found either.")
+
+    st.markdown("### 🔄 Restore Latest Dropbox Backup")
+    if st.button("Restore Latest Dropbox Backup"):
+        drop_meta = find_latest_dropbox_backup()
+        if not drop_meta:
+            st.warning("No Dropbox backups found in folder.")
+        else:
+            remote_path = drop_meta.get("path_display") or drop_meta.get("path_lower")
+            tmp_dest = ROOT / f"dropbox_restore_{datetime.now().strftime('%Y%m%d_%H%M%S')}.zip"
+            ok = download_dropbox_file(remote_path, tmp_dest)
+            if ok:
+                ok2 = restore_from_zip(tmp_dest)
+                try:
+                    tmp_dest.unlink()
+                except Exception:
+                    pass
+                if ok2:
+                    st.success("Restore complete from Dropbox latest backup. Data reloaded.")
+                    safe_rerun()
+                else:
+                    st.error("Restore from Dropbox failed. Check logs.")
+            else:
+                st.error("Download from Dropbox failed.")
 
 # ====================================================
 # === ROUTING ===
