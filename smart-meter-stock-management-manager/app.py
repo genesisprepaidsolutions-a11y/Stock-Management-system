@@ -515,8 +515,10 @@ except Exception:
 # ====================================================
 # === EMAIL CONFIG ===
 # ====================================================
-MTP_SERVER = "mail.acucommholdings.co.za"
-SMTP_PORT = 465
+SENDER_EMAIL = st.secrets["SENDER_EMAIL"]
+SENDER_PASSWORD = st.secrets["SENDER_PASSWORD"]
+SMTP_SERVER = st.secrets["SMTP_SERVER"]
+SMTP_PORT = int(st.secrets["SMTP_PORT"])
 
 # Use secret if set; otherwise fall back to the admin address provided.
 SENDER_EMAIL = st.secrets.get("SENDER_EMAIL")
