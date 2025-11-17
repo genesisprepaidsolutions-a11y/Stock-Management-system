@@ -519,13 +519,13 @@ SMTP_SERVER = "smtp.acucommholdings.co.za"
 SMTP_PORT = 465
 
 # Use secret if set; otherwise fall back to the admin address provided.
-SENDER_EMAIL = get_secret("EXCHANGE_EMAIL") or "admin@acucommholdings.co.za"
-SENDER_PASSWORD = get_secret("EXCHANGE_PASSWORD")
-CONTRACTOR_EMAIL = get_secret("CONTRACTOR_EMAIL")
-ETHEKWINI_EMAIL = get_secret("ETHEKWINI_EMAIL")
-INSTALLER_EMAIL = get_secret("INSTALLER_EMAIL")
-MANAGER_EMAIL = get_secret("MANAGER_EMAIL")
-MANUFACTURER_EMAIL = get_secret("MANUFACTURER_EMAIL")
+SENDER_EMAIL = st.secrets.get("SENDER_EMAIL")
+SENDER_PASSWORD = st.secrets.get("SENDER_PASSWORD")
+CONTRACTOR_EMAIL = st.secrets.get("CONTRACTOR_EMAIL")
+ETHEKWINI_EMAIL = st.secrets.get("ETHEKWINI_EMAIL")
+INSTALLER_EMAIL = st.secrets.get("INSTALLER_EMAIL")
+MANAGER_EMAIL = st.secrets.get("MANAGER_EMAIL")
+MANUFACTURER_EMAIL = st.secrets.get("MANUFACTURER_EMAIL")
 
 # Hold last detailed error for UI feedback (keeps backward compatibility)
 LAST_EMAIL_ERROR = None
