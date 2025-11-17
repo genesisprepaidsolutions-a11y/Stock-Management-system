@@ -15,6 +15,8 @@ import requests  # optional: only used if Graph upload is enabled and Dropbox
 import json
 from PIL import Image
 import time
+from sendgrid import SendGridAPIClient
+from sendgrid.helpers.mail import Mail
 
 # ====================================================
 # === THEME & BRAND COLOURS ===
