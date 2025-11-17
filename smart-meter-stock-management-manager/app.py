@@ -518,11 +518,6 @@ except Exception:
 MTP_SERVER = "mail.acucommholdings.co.za"
 SMTP_PORT = 465
 
-server = smtplib.SMTP_SSL(SMTP_SERVER, SMTP_PORT)
-server.login(SENDER_EMAIL, SENDER_PASSWORD)
-server.sendmail(SENDER_EMAIL, recipient, msg.as_string())
-server.quit()
-
 # Use secret if set; otherwise fall back to the admin address provided.
 SENDER_EMAIL = st.secrets.get("SENDER_EMAIL")
 SENDER_PASSWORD = st.secrets.get("SENDER_PASSWORD")
