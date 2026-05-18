@@ -714,9 +714,10 @@ def contractor_ui():
     contractor_name = st.session_state.auth["name"]
     installer_name = st.text_input("Installer Name")
     st.subheader("Select Stock Items & Quantities")
-    col1, col2 = st.columns(2)
-    meter_qty = col1.number_input("DN15 Meter Quantity", min_value=0, value=0, step=1)
-    keypad_qty = col2.number_input("CIU Keypad Quantity", min_value=0, value=0, step=1)
+    col1, col2 , col3 = st.columns(3)
+    meter_qty = col1.number_input("DN25 Meter Quantity", min_value=0, value=0, step=1)
+    meter_qty = col2.number_input("DN15 Meter Quantity", min_value=0, value=0, step=1)
+    keypad_qty = col3.number_input("CIU Keypad Quantity", min_value=0, value=0, step=1)
     notes = st.text_area("Notes")
     if st.button("Submit Request"):
         if not installer_name:
@@ -767,8 +768,9 @@ def manufacturer_ui():
     # New: allow manufacturer to input quantities per product like contractor
     st.subheader("Select Products & Quantities to Dispatch")
     col1, col2 = st.columns(2)
-    manu_meter_qty = col1.number_input("DN15 Meter Dispatch Quantity", min_value=0, value=0, step=1)
-    manu_keypad_qty = col2.number_input("CIU Keypad Dispatch Quantity", min_value=0, value=0, step=1)
+    manu_meter_qty = col1.number_input("DN25 Meter Dispatch Quantity", min_value=0, value=0, step=1)
+     manu_meter_qty = col2.number_input("DN15 Meter Dispatch Quantity", min_value=0, value=0, step=1)
+    manu_keypad_qty = col3.number_input("CIU Keypad Dispatch Quantity", min_value=0, value=0, step=1)
 
     batch_num = st.text_input("Batch Number", value="")
     dispatch_date = st.date_input("Dispatch Date", value=datetime.now().date())
