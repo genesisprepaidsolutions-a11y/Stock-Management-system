@@ -703,34 +703,79 @@ def logout():
 # ====================================================
 # === ROLE UI PANELS ===
 # ====================================================
+# ====================================================
+# CONTRACTOR UI
+# ====================================================
+
 def contractor_ui():
     st.header("Contractor - Submit Stock Request")
+
     contractor_logo = ROOT / "contractor logo.jpg"
+
     if contractor_logo.exists():
         st.markdown("<div style='display:flex;justify-content:center;'>", unsafe_allow_html=True)
         st.image(str(contractor_logo), width=500)
         st.markdown("</div>", unsafe_allow_html=True)
+
     st.markdown("---")
+
     contractor_name = st.session_state.auth["name"]
+
     installer_name = st.text_input("Installer Name")
+
     st.subheader("Select Stock Items & Quantities")
-    col1, col2 , col3 = st.columns(3)
-    meter_qty = col1.number_input("DN25 Meter Quantity", min_value=0, value=0, step=1)
-    meter_qty = col2.number_input("DN15 Meter Quantity", min_value=0, value=0, step=1)
-    keypad_qty = col3.number_input("CIU Keypad Quantity", min_value=0, value=0, step=1)
+
+    col1, col2, col3 = st.columns(3)
+
+    dn25_qty = col1.number_input(
+        "DN25 Meter Quantity",
+        min_value=0,
+        value=0,
+        step=1
+    )
+
+    dn15_qty = col2.number_input(
+        "DN15 Meter Quantity",
+        min_value=0,
+        value=0,
+        step=1
+    )
+
+    keypad_qty = col3.number_input(
+        "CIU Keypad Quantity",
+        min_value=0,
+        value=0,
+        step=1
+    )
+
     notes = st.text_area("Notes")
+
     if st.button("Submit Request"):
+
         if not installer_name:
             st.warning("Please enter installer name")
-        elif meter_qty == 0 and keypad_qty == 0:
+
+        elif dn25_qty == 0 and dn15_qty == 0 and keypad_qty == 0:
             st.warning("Please request at least one item.")
+
         else:
+
             df = load_data()
+
             base_rid = generate_request_id(prefix="REQ")
+
             entries = []
-            for item_type, qty in [("DN15 Meter", meter_qty), ("CIU Keypad", keypad_qty)]:
+
+            for item_type, qty in [
+                ("DN25 Meter", dn25_qty),
+                ("DN15 Meter", dn15_qty),
+                ("CIU Keypad", keypad_qty)
+            ]:
+
                 if qty > 0:
+
                     rid = f"{base_rid}-{item_type.replace(' ', '_')[:10]}"
+
                     entries.append({
                         "Date_Requested": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
                         "Request_ID": rid,
@@ -753,61 +798,134 @@ def contractor_ui():
                         "Dispatch_Note": "",
                         "Dispatch_Docs": ""
                     })
+
             if entries:
+
                 df = pd.concat([df, pd.DataFrame(entries)], ignore_index=True)
+
                 save_data(df)
+
                 st.success(f"✅ Request(s) submitted under base ID {base_rid}")
 
+
+# ====================================================
+# MANUFACTURER UI
+# ====================================================
+
 def manufacturer_ui():
+
     st.header("Manufacturer - Dispatch Stock to City")
-    st.markdown("Use this panel to notify the city of dispatched batches. City must approve before stock is added to the system.")
+
+    st.markdown(
+        "Use this panel to notify the city of dispatched batches. "
+        "City must approve before stock is added to the system."
+    )
+
     manu_name = st.session_state.auth["name"]
-    st.text_input("Manufacturer Name", value=manu_name, key="manu_name_field")
+
+    st.text_input(
+        "Manufacturer Name",
+        value=manu_name,
+        key="manu_name_field"
+    )
+
     st.markdown("---")
 
-    # New: allow manufacturer to input quantities per product like contractor
     st.subheader("Select Products & Quantities to Dispatch")
-    col1, col2 = st.columns(2)
-    manu_meter_qty = col1.number_input("DN25 Meter Dispatch Quantity", min_value=0, value=0, step=1)
-     manu_meter_qty = col2.number_input("DN15 Meter Dispatch Quantity", min_value=0, value=0, step=1)
-    manu_keypad_qty = col3.number_input("CIU Keypad Dispatch Quantity", min_value=0, value=0, step=1)
+
+    col1, col2, col3 = st.columns(3)
+
+    dn25_dispatch_qty = col1.number_input(
+        "DN25 Meter Dispatch Quantity",
+        min_value=0,
+        value=0,
+        step=1
+    )
+
+    dn15_dispatch_qty = col2.number_input(
+        "DN15 Meter Dispatch Quantity",
+        min_value=0,
+        value=0,
+        step=1
+    )
+
+    manu_keypad_qty = col3.number_input(
+        "CIU Keypad Dispatch Quantity",
+        min_value=0,
+        value=0,
+        step=1
+    )
 
     batch_num = st.text_input("Batch Number", value="")
-    dispatch_date = st.date_input("Dispatch Date", value=datetime.now().date())
+
+    dispatch_date = st.date_input(
+        "Dispatch Date",
+        value=datetime.now().date()
+    )
+
     dispatch_note = st.text_area("Delivery Note")
-    dispatch_docs = st.file_uploader("Attach Delivery Document (optional)", type=["pdf", "jpg", "png"])
+
+    dispatch_docs = st.file_uploader(
+        "Attach Delivery Document (optional)",
+        type=["pdf", "jpg", "png"]
+    )
 
     if st.button("Submit Dispatch to City"):
+
         if not batch_num.strip():
+
             st.warning("Please enter a batch number.")
-        elif manu_meter_qty == 0 and manu_keypad_qty == 0:
-            st.warning("Please enter at least one dispatch quantity for a product.")
+
+        elif dn25_dispatch_qty == 0 and dn15_dispatch_qty == 0 and manu_keypad_qty == 0:
+
+            st.warning(
+                "Please enter at least one dispatch quantity for a product."
+            )
+
         else:
+
             df = load_data()
+
             base_rid = generate_request_id(prefix="MANU")
+
             entries = []
+
             doc_path = ""
-            # Save attached doc once and reuse path
+
             if dispatch_docs:
+
                 filename = f"{base_rid}_{dispatch_docs.name}"
+
                 dest = DATA_DIR / filename
+
                 try:
+
                     with open(dest, "wb") as f:
                         f.write(dispatch_docs.getbuffer())
+
                     doc_path = str(dest)
+
                 except Exception as e:
+
                     st.warning(f"Could not save attached document: {e}")
 
-            for item_type, qty in [("DN15 Meter", manu_meter_qty), ("CIU Keypad", manu_keypad_qty)]:
+            for item_type, qty in [
+                ("DN25 Meter", dn25_dispatch_qty),
+                ("DN15 Meter", dn15_dispatch_qty),
+                ("CIU Keypad", manu_keypad_qty)
+            ]:
+
                 if qty > 0:
+
                     rid = f"{base_rid}-{item_type.replace(' ', '_')[:10]}"
+
                     new = {
                         "Date_Requested": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
                         "Request_ID": rid,
-                        "Contractor_Name": "",  # not applicable
+                        "Contractor_Name": "",
                         "Installer_Name": "",
                         "Meter_Type": item_type,
-                        "Requested_Qty": "",  # not used for manufacturer dispatch
+                        "Requested_Qty": "",
                         "Approved_Qty": "",
                         "Photo_Path": "",
                         "Status": "Pending City Approval (Manufacturer Delivery)",
@@ -823,23 +941,36 @@ def manufacturer_ui():
                         "Dispatch_Note": dispatch_note,
                         "Dispatch_Docs": doc_path
                     }
+
                     entries.append(new)
 
             if entries:
+
                 df = pd.concat([df, pd.DataFrame(entries)], ignore_index=True)
+
                 save_data(df)
-                st.success(f"✅ Dispatch submitted to City as base ID {base_rid} ({len(entries)} item rows created)")
-                # optional: email notify city
+
+                st.success(
+                    f"✅ Dispatch submitted to City as base ID {base_rid} "
+                    f"({len(entries)} item rows created)"
+                )
+
                 try:
+
                     if ETHEKWINI_EMAIL:
+
                         send_email(
                             subject=f"Manufacturer Dispatch Pending Approval: {base_rid}",
-                            html_body=f"<p>Manufacturer <b>{manu_name}</b> submitted dispatch <b>{base_rid}</b> (Batch {batch_num}).</p>",
+                            html_body=(
+                                f"<p>Manufacturer <b>{manu_name}</b> "
+                                f"submitted dispatch <b>{base_rid}</b> "
+                                f"(Batch {batch_num}).</p>"
+                            ),
                             to_emails=ETHEKWINI_EMAIL
                         )
+
                 except Exception:
                     pass
-
 # ====================================================
 # === CITY UI (UPDATED REPORT DETAILS) ===
 # ====================================================
